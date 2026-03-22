@@ -540,7 +540,7 @@ Decoder:   SDXLVAEDecoder        (from SwiftTubería catalog)
 Renderer:  ImageRenderer         (from SwiftTubería catalog)
 ```
 
-**Example — FLUX.2 Klein recipe**:
+**Illustrative — FLUX.2 Klein recipe** (deferred, shown for design validation):
 ```
 Encoder:   Qwen3TextEncoder      (from flux-2-swift-mlx)
 Scheduler: FlowMatchEulerScheduler (from SwiftTubería catalog)
@@ -914,11 +914,11 @@ SwiftTubería depends on mlx-swift for compute, swift-transformers for tokenizat
 
 ```
 pixart-swift-mlx ──▶ SwiftTubería ──▶ SwiftAcervo
-flux-2-swift-mlx ──▶ SwiftTubería ──▶ SwiftAcervo
 SwiftVinetas ──────▶ SwiftTubería ──▶ SwiftAcervo
 SwiftVoxAlta ──────▶ SwiftTubería ──▶ SwiftAcervo
 
 Model plugins also depend on SwiftAcervo directly (for component registration).
+flux-2-swift-mlx is currently standalone (migration deferred).
 ```
 
 ---
@@ -958,7 +958,6 @@ Each shared component is tested in isolation:
 Validate that outlet shapes match inlet expectations:
 - T5XXLEncoder outlet dim (4096) matches PixArtDiT conditioning inlet (4096)
 - SDXLVAEDecoder inlet channels (4) matches PixArt backbone output channels (4)
-- FluxVAEDecoder inlet channels (16) matches FluxDiT output channels (16)
 - Pipeline assembly with mismatched components fails with `PipelineError.incompatibleComponents`
 - Recipe with `supportsImageToImage = true` and non-`BidirectionalDecoder` decoder fails at assembly
 - `WeightedSegment.apply(weights:)` with missing keys throws clear error
@@ -969,7 +968,6 @@ Validate that outlet shapes match inlet expectations:
 
 Full pipeline smoke tests per model (provided by model plugin test suites):
 - PixArt recipe: prompt → CGImage (correct dimensions, non-zero pixels)
-- FLUX.2 recipe: prompt → CGImage (correct dimensions, non-zero pixels)
 
 **Seed reproducibility thresholds**:
 - Same device, same seed → PSNR > 40 dB between runs ("visually identical")
@@ -999,10 +997,11 @@ Full pipeline smoke tests per model (provided by model plugin test suites):
 
 | Previously In | Now In SwiftTubería | Stays In Original |
 |---|---|---|
-| flux-2-swift-mlx | Weight loading, quantization, memory management, image rendering, scheduler | FLUX DiT backbone, Qwen3/Mistral encoders, FLUX VAE, LoRA target layers |
 | pixart-swift-mlx | Weight loading, quantization, memory management, image rendering, SDXL VAE, DPM-Solver, T5 encoder | PixArt DiT backbone, weight key mapping |
 | SwiftVoxAlta | Model management, memory management, device detection | VoiceProvider, clone prompts, .vox handling, TTS pipeline specifics |
-| SwiftVinetas | Nothing moves out — Vinetas consumes Pipeline instead of raw model libs | Engine abstraction, prompt composition, style management, PromptFile |
+| SwiftVinetas | Nothing moves out — Vinetas consumes Pipeline for PixArt; Flux2Engine unchanged | Engine abstraction, prompt composition, style management, PromptFile |
+
+> **Note**: flux-2-swift-mlx migration is deferred. It remains a standalone library.
 
 ---
 
@@ -1015,11 +1014,10 @@ Full pipeline smoke tests per model (provided by model plugin test suites):
 5. **DPMSolverScheduler** — First shared scheduler (used by PixArt)
 6. **T5XXLEncoder** — First shared encoder (used by PixArt)
 7. **PixArt integration** — First model plugin, proves the system end-to-end
-8. **FlowMatchEulerScheduler** — Enables FLUX.2 migration
-9. **FLUX.2 migration** — Retrofit flux-2-swift-mlx as a plugin
-10. **AudioRenderer** — Enables future audio diffusion models
-11. **SwiftVinetas integration** — Simplify engine layer to delegate to Pipeline
-12. **SwiftVoxAlta integration** — Adopt infrastructure services
+8. **SwiftVinetas integration** — PixArtEngine via Pipeline; Flux2Engine unchanged
+9. **SwiftVoxAlta integration** — Adopt infrastructure services
+10. **FlowMatchEulerScheduler** — Completes catalog (for future model plugins)
+11. **AudioRenderer** — Enables future audio diffusion models
 
 ---
 
