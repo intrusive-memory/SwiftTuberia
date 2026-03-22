@@ -142,6 +142,22 @@ public protocol WeightedSegment: Sendable {
 extension WeightedSegment {
     public var tensorTransform: TensorTransform? { nil }
 }
+
+/// Recommended conformance pattern: `final class` with `@unchecked Sendable`.
+/// Pipe segments carry mutable state (loaded weights, isLoaded flag) but the
+/// DiffusionPipeline actor serializes all access — segments are never called
+/// concurrently. Using `final class` avoids `mutating` complexity on value types
+/// and `@unchecked Sendable` reflects the actor-serialized safety guarantee.
+///
+/// Example minimal conformance:
+/// ```swift
+/// public final class MyBackbone: Backbone, @unchecked Sendable {
+///     public typealias Configuration = MyBackboneConfig
+///     private var modules: [String: MLXArray] = [:]
+///     public private(set) var isLoaded = false
+///     // ... protocol requirements ...
+/// }
+/// ```
 ```
 
 **Loading flow** — the pipeline orchestrates, segments receive:
@@ -209,7 +225,7 @@ public enum PredictionType: String, Sendable {
 ```
 
 **Methods**:
-- `configure(steps:) -> SchedulerPlan` — compute timestep schedule
+- `configure(steps:startTimestep:) -> SchedulerPlan` — compute timestep schedule. `startTimestep` is optional (default `nil`) — when provided (for img2img), the scheduler truncates the timestep plan to begin at that step, producing a shorter denoising trajectory. The `strength` parameter in `DiffusionGenerationRequest` maps to `startTimestep` via `Int(Float(totalSteps) * (1.0 - strength))`.
 - `step(output:timestep:sample:) -> MLXArray` — single denoising step
 - `addNoise(to:noise:at:) -> MLXArray` — for img2img initialization
 - `reset()` — clear state between generations
@@ -436,6 +452,12 @@ public enum UnconditionalEmbeddingStrategy: Sendable {
 - If `.zeroVector`: pipeline constructs zeros of the declared shape
 - If `.none`: skip CFG entirely — guidance scale is informational only (e.g., FLUX embeds it into the model via the backbone's conditioning)
 
+**Orchestration field mapping**: The pipeline maps `TextEncoderOutput` fields to `BackboneInput` fields during orchestration:
+- `TextEncoderOutput.embeddings` → `BackboneInput.conditioning`
+- `TextEncoderOutput.mask` → `BackboneInput.conditioningMask`
+
+This mapping is internal to the pipeline — neither the encoder nor the backbone needs to know the other's field names.
+
 **Orchestration flow**:
 1. `E.encode(input)` → embeddings
 2. **Initial latents**:
@@ -458,7 +480,7 @@ The backbone sees the same interface in both modes — it is never aware of the 
 A recipe declares which pipe segments to connect. Model plugins provide recipes:
 
 ```swift
-public protocol PipelineRecipe {
+public protocol PipelineRecipe: Sendable {
     associatedtype Encoder: TextEncoder
     associatedtype Sched: Scheduler
     associatedtype Back: Backbone
@@ -475,8 +497,22 @@ public protocol PipelineRecipe {
     /// If true, the Decoder must conform to BidirectionalDecoder.
     var supportsImageToImage: Bool { get }
 
+    /// CFG strategy for this model.
+    var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { get }
+
+    /// All Acervo component IDs needed for this recipe.
+    /// Used by the pipeline to call `Acervo.ensureComponentsReady(allComponentIds)`.
+    var allComponentIds: [String] { get }
+
+    /// Quantization config per pipeline role. Return `.asStored` for pre-quantized components.
+    func quantizationFor(_ role: PipelineRole) -> QuantizationConfig
+
     /// Validate that all pipe segments are compatible before assembly.
     func validate() throws
+}
+
+public enum PipelineRole: String, Sendable, CaseIterable {
+    case encoder, scheduler, backbone, decoder, renderer
 }
 ```
 
@@ -507,6 +543,50 @@ Scheduler: FlowMatchEulerScheduler (from SwiftTubería catalog)
 Backbone:  FluxDiT               (from flux-2-swift-mlx — the unique architecture)
 Decoder:   FluxVAEDecoder        (from flux-2-swift-mlx)
 Renderer:  ImageRenderer         (from SwiftTubería catalog)
+```
+
+### R3.3.1 DiffusionPipeline Construction API
+
+A recipe becomes a pipeline through `DiffusionPipeline.init(recipe:)`:
+
+```swift
+public actor DiffusionPipeline<E: TextEncoder, S: Scheduler, B: Backbone, D: Decoder, R: Renderer>: GenerationPipeline {
+    public typealias Request = DiffusionGenerationRequest
+    public typealias Result = DiffusionGenerationResult
+
+    /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
+    /// Throws `PipelineError.incompatibleComponents` if validation fails.
+    public init<Recipe: PipelineRecipe>(recipe: Recipe) throws
+        where Recipe.Encoder == E, Recipe.Sched == S, Recipe.Back == B, Recipe.Dec == D, Recipe.Rend == R
+
+    /// Generate output from a request.
+    public func generate(request: Request, progress: @Sendable (PipelineProgress) -> Void) async throws -> Result
+
+    /// Load all model weights (respecting memory budget and phased loading).
+    public func loadModels(progress: @Sendable (Double, String) -> Void) async throws
+
+    /// Unload all model weights and clear GPU cache.
+    public func unloadModels() async
+
+    /// Memory requirements for all-at-once and phased loading strategies.
+    public var memoryRequirement: MemoryRequirement { get }
+
+    /// Whether all weighted segments currently have weights loaded.
+    public var isLoaded: Bool { get }
+}
+```
+
+**Engine usage pattern** (e.g., in SwiftVinetas):
+```swift
+// In PixArtEngine (~50 lines total)
+let recipe = PixArtRecipe()  // from pixart-swift-mlx
+let pipeline = try DiffusionPipeline(recipe: recipe)
+try await pipeline.loadModels { fraction, component in
+    reportProgress(.loading(component: component, fraction: fraction))
+}
+let result = try await pipeline.generate(request: diffusionRequest) { progress in
+    reportProgress(progress)
+}
 ```
 
 ### R3.4 Two-Phase Loading
@@ -570,7 +650,9 @@ Shared services available to all pipe segments and pipelines.
 
 **SwiftTubería does not have its own model registry.** All model discovery, download, caching, and file access is delegated to SwiftAcervo's Component Registry (see SwiftAcervo REQUIREMENTS.md).
 
-Model plugins register their `ComponentDescriptor` entries with Acervo at import time. SwiftTubería addresses models exclusively through Acervo's abstractions:
+Model plugins register their `ComponentDescriptor` entries with Acervo at import time. **Catalog components also self-register**: when `TuberíaCatalog` is imported, it registers Acervo descriptors for all shared components (T5-XXL, SDXL VAE, DPM-Solver weights if any, etc.) via the same static `let` initialization pattern. This means a model plugin does NOT need to register catalog components — only its own model-specific components. If both TuberíaCatalog and a model plugin register the same component ID, Acervo deduplicates silently (same ID + same repo = no-op).
+
+SwiftTubería addresses models exclusively through Acervo's abstractions:
 
 - **Catalog queries**: `Acervo.isComponentReady(id)`, `Acervo.registeredComponents()`
 - **Downloads**: `Acervo.ensureComponentsReady(recipe.allComponentIds)`
@@ -685,6 +767,8 @@ public struct DeviceCapability: Sendable {
 
 Detection uses `sysctlbyname("machdep.cpu.brand_string")`. Neural Accelerator detection contributed from SwiftVoxAlta's M5 logic. Cached at first access.
 
+**Access patterns**: `DeviceCapability.current` is the **synchronous** static property — it reads hardware info once and caches. This is the recommended accessor for all consumers. `MemoryManager.shared.deviceCapability` provides the same value through the actor for contexts that already have an actor reference, but requires `await`. For synchronous contexts (e.g., `EngineRouter` deciding which engines to register), use `DeviceCapability.current` directly — no actor hop needed.
+
 ### R5.4 Progress Reporter
 
 Unified progress reporting for all pipeline operations.
@@ -754,6 +838,22 @@ LoRA support is split between the pipeline and model plugins.
 - Any model-specific LoRA key mapping
 
 This separation means a new model gets LoRA support by declaring its target layers — no new LoRA loading code.
+
+```swift
+/// Configuration for a LoRA adapter. Referenced by `DiffusionGenerationRequest.loRA`.
+public struct LoRAConfig: Sendable {
+    /// Acervo component ID for the LoRA adapter safetensors.
+    /// Use a component ID (not a file path) so that Acervo manages download and access.
+    /// For local-only adapters not in the registry, use `localPath` instead.
+    public let componentId: String?
+    /// Local file path — fallback for adapters not registered in Acervo.
+    public let localPath: String?
+    /// Adapter scale (0.0 = no effect, 1.0 = full effect).
+    public let scale: Float
+    /// Optional activation keyword to prepend to the prompt.
+    public let activationKeyword: String?
+}
+```
 
 **Constraint**: Single active LoRA per generation (v1). Multiple LoRAs require sequential load/unload. This matches the verified limitation from the FLUX implementation. The infrastructure can be extended to support `[LoRAConfig]` with per-adapter scaling in a future version.
 
@@ -932,3 +1032,517 @@ The architecture is working when:
 4. **Pipeline assembly validates compatibility** at construction time, not at generation time. Mismatched components produce compile-time or immediate runtime errors, not silent corruption.
 
 5. **Memory management is centralized**. One MemoryManager coordinates all loaded components. Two-phase loading works identically across all models without per-model memory code.
+
+---
+
+## R16. Protocol Reference — Complete Swift Definitions
+
+This section contains the **canonical Swift source** for every public protocol, struct, and enum that crosses a repository boundary. Independent agents building model plugins or consumers MUST use these definitions — they are the contract.
+
+All protocols, structs, and enums below are `public` and live in the `Tubería` target unless otherwise noted.
+
+### R16.1 Pipe Segment Protocols
+
+```swift
+import MLX
+
+// MARK: - Shared Lifecycle
+
+/// Remapped, quantized parameter tensors ready for module assignment.
+public struct ModuleParameters: Sendable {
+    public let parameters: [String: MLXArray]
+}
+
+/// Key remapping function: safetensors key → module key. Return nil to skip a key.
+public typealias KeyMapping = @Sendable (String) -> String?
+
+/// Optional per-tensor transform applied after key remapping, before quantization.
+public typealias TensorTransform = @Sendable (String, MLXArray) -> MLXArray
+
+/// Quantization strategy for weight loading.
+public enum QuantizationConfig: Sendable {
+    case asStored
+    case float16
+    case bfloat16
+    case int4(groupSize: Int = 64)
+    case int8(groupSize: Int = 64)
+}
+
+/// Lifecycle for pipe segments that carry model weights.
+/// Conformers MUST be `final class` with `@unchecked Sendable`.
+/// The DiffusionPipeline actor serializes all access.
+public protocol WeightedSegment: Sendable {
+    func apply(weights: ModuleParameters) throws
+    func unload()
+    var estimatedMemoryBytes: Int { get }
+    var isLoaded: Bool { get }
+    var keyMapping: KeyMapping { get }
+    var tensorTransform: TensorTransform? { get }
+}
+
+extension WeightedSegment {
+    public var tensorTransform: TensorTransform? { nil }
+}
+
+// MARK: - TextEncoder
+
+public struct TextEncoderInput: Sendable {
+    public let text: String
+    public let maxLength: Int
+
+    public init(text: String, maxLength: Int) {
+        self.text = text
+        self.maxLength = maxLength
+    }
+}
+
+public struct TextEncoderOutput: Sendable {
+    /// Dense embeddings. Shape: [B, seq, dim]
+    public let embeddings: MLXArray
+    /// Attention mask. Shape: [B, seq]. 1 = real token, 0 = padding.
+    public let mask: MLXArray
+
+    public init(embeddings: MLXArray, mask: MLXArray) {
+        self.embeddings = embeddings
+        self.mask = mask
+    }
+}
+
+public protocol TextEncoder: WeightedSegment {
+    /// Configuration type — must include the Acervo component ID for weights
+    /// and any non-weight resources (e.g., tokenizer component ID).
+    associatedtype Configuration: Sendable
+
+    /// Embedding dimension of the encoder output. Used for assembly-time validation
+    /// against `Backbone.expectedConditioningDim`.
+    var outputEmbeddingDim: Int { get }
+
+    /// Encode text into dense embeddings.
+    func encode(_ input: TextEncoderInput) throws -> TextEncoderOutput
+}
+
+// MARK: - Scheduler
+
+public enum BetaSchedule: Sendable {
+    case linear(betaStart: Float, betaEnd: Float)
+    case cosine
+    case sqrt
+}
+
+public enum PredictionType: String, Sendable {
+    case epsilon    // predict noise (PixArt, SD, SDXL)
+    case velocity   // predict velocity / v-prediction (FLUX)
+    case sample     // predict clean sample directly
+}
+
+public struct SchedulerPlan: Sendable {
+    public let timesteps: [Int]
+    public let sigmas: [Float]
+
+    public init(timesteps: [Int], sigmas: [Float]) {
+        self.timesteps = timesteps
+        self.sigmas = sigmas
+    }
+}
+
+public protocol Scheduler: Sendable {
+    /// Configuration type for scheduler initialization.
+    associatedtype Configuration: Sendable
+
+    /// Compute the timestep schedule for a generation run.
+    /// - Parameters:
+    ///   - steps: Total number of denoising steps.
+    ///   - startTimestep: Optional starting timestep for img2img (truncates the plan).
+    ///     `nil` = full schedule (text-to-image). Derived from `strength` via
+    ///     `Int(Float(steps) * (1.0 - strength))`.
+    /// - Returns: A plan containing timesteps and sigmas for the denoising loop.
+    func configure(steps: Int, startTimestep: Int?) -> SchedulerPlan
+
+    /// Perform a single denoising step.
+    /// - Parameters:
+    ///   - output: Model noise prediction from the backbone.
+    ///   - timestep: Current timestep.
+    ///   - sample: Current noisy latents.
+    /// - Returns: Updated (less noisy) latents.
+    func step(output: MLXArray, timestep: Int, sample: MLXArray) -> MLXArray
+
+    /// Add noise to clean latents at a given timestep. Used for img2img initialization.
+    func addNoise(to sample: MLXArray, noise: MLXArray, at timestep: Int) -> MLXArray
+
+    /// Clear internal state between generation runs.
+    func reset()
+}
+
+extension Scheduler {
+    public func configure(steps: Int) -> SchedulerPlan {
+        configure(steps: steps, startTimestep: nil)
+    }
+}
+
+// MARK: - Backbone
+
+public struct BackboneInput: Sendable {
+    /// Noisy latents. Shape: [B, spatial..., channels]
+    public let latents: MLXArray
+    /// Text encoder embeddings (mapped from TextEncoderOutput.embeddings).
+    /// Shape: [B, seq, dim]
+    public let conditioning: MLXArray
+    /// Text encoder mask (mapped from TextEncoderOutput.mask).
+    /// Shape: [B, seq]
+    public let conditioningMask: MLXArray
+    /// Current denoising timestep. Scalar or [B].
+    public let timestep: MLXArray
+
+    public init(latents: MLXArray, conditioning: MLXArray,
+                conditioningMask: MLXArray, timestep: MLXArray) {
+        self.latents = latents
+        self.conditioning = conditioning
+        self.conditioningMask = conditioningMask
+        self.timestep = timestep
+    }
+}
+
+public protocol Backbone: WeightedSegment {
+    /// Configuration type — must include the Acervo component ID for weights.
+    associatedtype Configuration: Sendable
+
+    /// Expected embedding dimension from the connected TextEncoder.
+    /// Validated at assembly: must equal `TextEncoder.outputEmbeddingDim`.
+    var expectedConditioningDim: Int { get }
+
+    /// Number of latent channels produced by the backbone.
+    /// Validated at assembly: must equal `Decoder.expectedInputChannels`.
+    var outputLatentChannels: Int { get }
+
+    /// Forward pass — noise prediction.
+    /// - Parameter input: Conditioned latents and timestep.
+    /// - Returns: Noise prediction. Shape: [B, spatial..., channels]
+    func forward(_ input: BackboneInput) throws -> MLXArray
+}
+
+// MARK: - Decoder
+
+public protocol DecoderMetadata: Sendable {
+    var scalingFactor: Float { get }
+}
+
+public struct ImageDecoderMetadata: DecoderMetadata, Sendable {
+    public let scalingFactor: Float
+    public init(scalingFactor: Float) { self.scalingFactor = scalingFactor }
+}
+
+public struct AudioDecoderMetadata: DecoderMetadata, Sendable {
+    public let scalingFactor: Float
+    public let sampleRate: Int
+    public init(scalingFactor: Float, sampleRate: Int) {
+        self.scalingFactor = scalingFactor
+        self.sampleRate = sampleRate
+    }
+}
+
+public struct DecodedOutput: Sendable {
+    /// Decoded data. Shape: [B, H, W, C] for images, [B, samples] for audio.
+    public let data: MLXArray
+    /// Modality-specific metadata for the Renderer.
+    public let metadata: any DecoderMetadata
+
+    public init(data: MLXArray, metadata: any DecoderMetadata) {
+        self.data = data
+        self.metadata = metadata
+    }
+}
+
+public protocol Decoder: WeightedSegment {
+    /// Configuration type — must include the Acervo component ID for weights.
+    associatedtype Configuration: Sendable
+
+    /// Expected number of latent channels from the connected Backbone.
+    /// Validated at assembly: must equal `Backbone.outputLatentChannels`.
+    var expectedInputChannels: Int { get }
+
+    /// VAE latent scaling factor. Applied internally by the decoder
+    /// (`latents * (1.0 / scalingFactor)`) — the pipeline does NOT touch this.
+    var scalingFactor: Float { get }
+
+    /// Decode latents into output data.
+    func decode(_ latents: MLXArray) throws -> DecodedOutput
+}
+
+/// A Decoder that can also encode (pixels → latents).
+/// Required for image-to-image and inpainting generation modes.
+public protocol BidirectionalDecoder: Decoder {
+    /// Encode pixel data into the latent space.
+    /// Input:  [B, H, W, 3] (normalized float pixels)
+    /// Output: [B, H/f, W/f, C] (latents)
+    func encode(_ pixels: MLXArray) throws -> MLXArray
+}
+
+// MARK: - Renderer
+
+public enum RenderedOutput: Sendable {
+    case image(CGImage)
+    case audio(AudioData)
+    case video(VideoFrames)
+}
+
+public struct AudioData: Sendable {
+    public let data: Data
+    public let sampleRate: Int
+    public init(data: Data, sampleRate: Int) {
+        self.data = data
+        self.sampleRate = sampleRate
+    }
+}
+
+public struct VideoFrames: Sendable {
+    public let frames: [CGImage]
+    public let frameRate: Double
+    public init(frames: [CGImage], frameRate: Double) {
+        self.frames = frames
+        self.frameRate = frameRate
+    }
+}
+
+public protocol Renderer: Sendable {
+    /// Configuration type (often `Void` for stateless renderers).
+    associatedtype Configuration: Sendable
+
+    /// Render decoded output into the final format.
+    func render(_ input: DecodedOutput) throws -> RenderedOutput
+}
+```
+
+### R16.2 Pipeline Types
+
+```swift
+// MARK: - Pipeline Protocol
+
+public struct MemoryRequirement: Sendable {
+    /// Total memory if all components loaded simultaneously.
+    public let peakMemoryBytes: UInt64
+    /// Maximum memory needed for any single loading phase.
+    public let phasedMemoryBytes: UInt64
+
+    public init(peakMemoryBytes: UInt64, phasedMemoryBytes: UInt64) {
+        self.peakMemoryBytes = peakMemoryBytes
+        self.phasedMemoryBytes = phasedMemoryBytes
+    }
+}
+
+public protocol GenerationPipeline: Sendable {
+    associatedtype Request
+    associatedtype Result
+
+    func generate(request: Request, progress: @Sendable (PipelineProgress) -> Void) async throws -> Result
+    func loadModels(progress: @Sendable (Double, String) -> Void) async throws
+    func unloadModels() async
+    var memoryRequirement: MemoryRequirement { get }
+    var isLoaded: Bool { get }
+}
+
+// MARK: - Diffusion-Specific Types
+
+public struct DiffusionGenerationRequest: Sendable {
+    public let prompt: String
+    public let negativePrompt: String?
+    public let width: Int
+    public let height: Int
+    public let steps: Int
+    public let guidanceScale: Float
+    public let seed: UInt32?
+    public let loRA: LoRAConfig?
+    public let referenceImages: [CGImage]?
+    public let strength: Float?
+
+    public init(prompt: String, negativePrompt: String? = nil,
+                width: Int, height: Int, steps: Int, guidanceScale: Float,
+                seed: UInt32? = nil, loRA: LoRAConfig? = nil,
+                referenceImages: [CGImage]? = nil, strength: Float? = nil) {
+        self.prompt = prompt
+        self.negativePrompt = negativePrompt
+        self.width = width
+        self.height = height
+        self.steps = steps
+        self.guidanceScale = guidanceScale
+        self.seed = seed
+        self.loRA = loRA
+        self.referenceImages = referenceImages
+        self.strength = strength
+    }
+}
+
+public struct DiffusionGenerationResult: Sendable {
+    public let output: RenderedOutput
+    public let seed: UInt32
+    public let steps: Int
+    public let guidanceScale: Float
+    public let duration: TimeInterval
+
+    public init(output: RenderedOutput, seed: UInt32, steps: Int,
+                guidanceScale: Float, duration: TimeInterval) {
+        self.output = output
+        self.seed = seed
+        self.steps = steps
+        self.guidanceScale = guidanceScale
+        self.duration = duration
+    }
+}
+
+public struct LoRAConfig: Sendable {
+    /// Acervo component ID for the LoRA adapter safetensors.
+    public let componentId: String?
+    /// Local file path — fallback for adapters not registered in Acervo.
+    public let localPath: String?
+    /// Adapter scale (0.0 = no effect, 1.0 = full effect).
+    public let scale: Float
+    /// Optional activation keyword to prepend to the prompt.
+    public let activationKeyword: String?
+
+    public init(componentId: String? = nil, localPath: String? = nil,
+                scale: Float = 1.0, activationKeyword: String? = nil) {
+        self.componentId = componentId
+        self.localPath = localPath
+        self.scale = scale
+        self.activationKeyword = activationKeyword
+    }
+}
+
+public enum UnconditionalEmbeddingStrategy: Sendable {
+    case emptyPrompt
+    case zeroVector(shape: [Int])
+    case none
+}
+
+// MARK: - Pipeline Recipe
+
+public enum PipelineRole: String, Sendable, CaseIterable {
+    case encoder, scheduler, backbone, decoder, renderer
+}
+
+public protocol PipelineRecipe: Sendable {
+    associatedtype Encoder: TextEncoder
+    associatedtype Sched: Scheduler
+    associatedtype Back: Backbone
+    associatedtype Dec: Decoder
+    associatedtype Rend: Renderer
+
+    var encoderConfig: Encoder.Configuration { get }
+    var schedulerConfig: Sched.Configuration { get }
+    var backboneConfig: Back.Configuration { get }
+    var decoderConfig: Dec.Configuration { get }
+    var rendererConfig: Rend.Configuration { get }
+
+    var supportsImageToImage: Bool { get }
+    var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { get }
+    var allComponentIds: [String] { get }
+
+    func quantizationFor(_ role: PipelineRole) -> QuantizationConfig
+    func validate() throws
+}
+
+// MARK: - DiffusionPipeline
+
+public actor DiffusionPipeline<E: TextEncoder, S: Scheduler, B: Backbone, D: Decoder, R: Renderer>: GenerationPipeline {
+    public typealias Request = DiffusionGenerationRequest
+    public typealias Result = DiffusionGenerationResult
+
+    /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
+    /// Throws `PipelineError.incompatibleComponents` if validation fails.
+    public init<Recipe: PipelineRecipe>(recipe: Recipe) throws
+        where Recipe.Encoder == E, Recipe.Sched == S,
+              Recipe.Back == B, Recipe.Dec == D, Recipe.Rend == R
+
+    public func generate(request: Request,
+                         progress: @Sendable (PipelineProgress) -> Void) async throws -> Result
+    public func loadModels(progress: @Sendable (Double, String) -> Void) async throws
+    public func unloadModels() async
+    public var memoryRequirement: MemoryRequirement { get }
+    public var isLoaded: Bool { get }
+}
+
+// MARK: - Progress & Errors
+
+public enum PipelineProgress: Sendable {
+    case downloading(component: String, fraction: Double)
+    case loading(component: String, fraction: Double)
+    case encoding(fraction: Double)
+    case generating(step: Int, totalSteps: Int, elapsed: TimeInterval)
+    case decoding
+    case rendering
+    case complete(duration: TimeInterval)
+}
+
+public enum PipelineError: Error {
+    case incompatibleComponents(inlet: String, outlet: String, reason: String)
+    case missingComponent(role: String)
+    case modelNotDownloaded(component: String)
+    case insufficientMemory(required: UInt64, available: UInt64, component: String)
+    case weightLoadingFailed(component: String, reason: String)
+    case downloadFailed(component: String, reason: String)
+    case encodingFailed(reason: String)
+    case generationFailed(step: Int, reason: String)
+    case decodingFailed(reason: String)
+    case renderingFailed(reason: String)
+    case cancelled
+}
+```
+
+### R16.3 Infrastructure Types
+
+```swift
+// MARK: - Weight Loader
+
+public struct WeightLoader {
+    public static func load(
+        componentId: String,
+        keyMapping: KeyMapping,
+        tensorTransform: TensorTransform? = nil,
+        quantization: QuantizationConfig = .asStored
+    ) async throws -> ModuleParameters
+}
+
+// MARK: - Memory Manager
+
+public actor MemoryManager {
+    public static let shared: MemoryManager
+
+    public var availableMemory: UInt64 { get }
+    public var totalMemory: UInt64 { get }
+    public var deviceCapability: DeviceCapability { get }
+
+    public func softCheck(requiredBytes: UInt64) -> Bool
+    public func hardValidate(requiredBytes: UInt64) throws
+
+    public func registerLoaded(component: String, bytes: UInt64)
+    public func unregisterLoaded(component: String)
+    public var loadedComponentsMemory: UInt64 { get }
+
+    public func clearGPUCache()
+}
+
+// MARK: - Device Capability
+
+public struct DeviceCapability: Sendable {
+    public let chipGeneration: AppleSiliconGeneration
+    public let totalMemoryGB: Int
+    public let platform: Platform
+    public let hasNeuralAccelerators: Bool
+
+    /// Synchronous static accessor. Cached at first access. No actor required.
+    /// This is the recommended accessor for all consumers.
+    public static let current: DeviceCapability
+
+    public enum AppleSiliconGeneration: String, Sendable, CaseIterable {
+        case m1, m1Pro, m1Max, m1Ultra
+        case m2, m2Pro, m2Max, m2Ultra
+        case m3, m3Pro, m3Max, m3Ultra
+        case m4, m4Pro, m4Max, m4Ultra
+        case m5, m5Pro, m5Max, m5Ultra
+        case unknown
+    }
+
+    public enum Platform: String, Sendable {
+        case macOS, iPadOS
+    }
+}
+```
