@@ -198,7 +198,7 @@ inlet:  TextEncoderInput  { text: String, maxLength: Int }
 outlet: TextEncoderOutput { embeddings: MLXArray [B, seq, dim], mask: MLXArray [B, seq] }
 ```
 
-**Lifecycle**: Conforms to `WeightedSegment` (see R2.0). Pipeline loads weights via `WeightLoader` → calls `apply(weights:)`. Non-weight resources (tokenizers) loaded by the encoder during initialization through its `Configuration`.
+**Lifecycle**: Conforms to `WeightedSegment` (see R2.0). The pipeline calls `init(configuration:)` to instantiate the encoder, then loads weights via `WeightLoader` → calls `apply(weights:)`. Non-weight resources (tokenizers) are loaded by the encoder during `init(configuration:)` — the Configuration includes the Acervo component ID for the tokenizer, and the encoder loads it via `withComponentAccess` during initialization.
 **Shape contract**: `var outputEmbeddingDim: Int { get }` — e.g., 4096 for T5-XXL, 768 for CLIP. Validated at pipeline assembly against Backbone's `expectedConditioningDim`.
 
 Different models use different text encoders (T5-XXL for PixArt, Qwen3 for FLUX Klein, Mistral for FLUX Dev, CLIP for future SD models). The encoder protocol is the same; the implementation varies.
@@ -551,15 +551,20 @@ Renderer:  ImageRenderer         (from SwiftTubería catalog)
 
 ### R3.3.1 DiffusionPipeline Construction API
 
-A recipe becomes a pipeline through `DiffusionPipeline.init(recipe:)`:
+A recipe becomes a pipeline through `DiffusionPipeline.init(recipe:)`. The init:
+1. Instantiates each component via `init(configuration:)` using the recipe's config values
+2. Calls `recipe.validate()` on the assembled components
+3. Throws `PipelineError.incompatibleComponents` if shape contracts fail
 
 ```swift
 public actor DiffusionPipeline<E: TextEncoder, S: Scheduler, B: Backbone, D: Decoder, R: Renderer>: GenerationPipeline {
     public typealias Request = DiffusionGenerationRequest
     public typealias Result = DiffusionGenerationResult
 
-    /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
-    /// Throws `PipelineError.incompatibleComponents` if validation fails.
+    /// Construct a pipeline from a recipe.
+    /// 1. Creates components: E(configuration: recipe.encoderConfig), etc.
+    /// 2. Calls recipe.validate() to check shape contracts.
+    /// Throws PipelineError.incompatibleComponents if validation fails.
     public init<Recipe: PipelineRecipe>(recipe: Recipe) throws
         where Recipe.Encoder == E, Recipe.Sched == S, Recipe.Back == B, Recipe.Dec == D, Recipe.Rend == R
 
@@ -572,11 +577,11 @@ public actor DiffusionPipeline<E: TextEncoder, S: Scheduler, B: Backbone, D: Dec
     /// Unload all model weights and clear GPU cache.
     public func unloadModels() async
 
-    /// Memory requirements for all-at-once and phased loading strategies.
-    public var memoryRequirement: MemoryRequirement { get }
+    /// Memory requirements — nonisolated, safe to access without `await`.
+    nonisolated public var memoryRequirement: MemoryRequirement { get }
 
-    /// Whether all weighted segments currently have weights loaded.
-    public var isLoaded: Bool { get }
+    /// Whether all weighted segments currently have weights loaded — nonisolated.
+    nonisolated public var isLoaded: Bool { get }
 }
 ```
 
@@ -619,6 +624,8 @@ Concrete implementations of pipe segments that are reused across multiple models
 
 Encoders that are model-specific (Qwen3 for FLUX Klein, Mistral for FLUX Dev) remain in their model plugin packages but conform to the same `TextEncoder` protocol.
 
+**T5XXLEncoder tokenizer**: The tokenizer is **bundled** with the encoder weight component (same HuggingFace repo, same Acervo component). The encoder's `init(configuration:)` loads the tokenizer files (`tokenizer.json`, `tokenizer_config.json`) via `withComponentAccess` using the same component ID as the weights. It uses `swift-transformers`' `AutoTokenizer.from(modelFolder:)` pointed at the component handle's directory. No separate tokenizer component ID is needed.
+
 ### R4.2 Schedulers
 
 | Component | Algorithm | Used By |
@@ -643,6 +650,77 @@ Model-specific decoders (FLUX VAE) remain in their plugin packages.
 | `AudioRenderer` | [B, samples] float | Data (WAV/M4A) | Yes |
 
 Renderers have no model weights. They are pure data transformations.
+
+### R4.5 Catalog Component Configuration Types
+
+Each catalog component defines a `Configuration` struct used by pipeline recipes to instantiate the component via `init(configuration:)`. These are the authoritative definitions — model plugin recipes provide values for these fields.
+
+**T5XXLEncoder.Configuration**:
+```swift
+public struct T5XXLEncoderConfiguration: Sendable {
+    /// Acervo component ID for weights AND tokenizer files (bundled together).
+    public let componentId: String              // e.g., "t5-xxl-encoder-int4"
+    /// Maximum sequence length for tokenization.
+    public let maxSequenceLength: Int           // default: 120 for PixArt, 77 for SD
+    /// Embedding dimension (informational — fixed at 4096 for T5-XXL).
+    public let embeddingDim: Int                // 4096
+}
+```
+
+**DPMSolverScheduler.Configuration**:
+```swift
+public struct DPMSolverSchedulerConfiguration: Sendable {
+    /// Beta schedule defining the noise schedule.
+    public let betaSchedule: BetaSchedule       // e.g., .linear(betaStart: 0.0001, betaEnd: 0.02)
+    /// What the model predicts.
+    public let predictionType: PredictionType   // e.g., .epsilon
+    /// Solver order (1 = first-order Euler, 2 = second-order midpoint).
+    public let solverOrder: Int                 // default: 2
+    /// Total training timesteps (for beta schedule computation).
+    public let trainTimesteps: Int              // default: 1000
+}
+```
+
+**FlowMatchEulerScheduler.Configuration**:
+```swift
+public struct FlowMatchEulerSchedulerConfiguration: Sendable {
+    /// Shift parameter for the sigma schedule.
+    public let shift: Float                     // e.g., 1.0 for FLUX
+}
+```
+
+**SDXLVAEDecoder.Configuration**:
+```swift
+public struct SDXLVAEDecoderConfiguration: Sendable {
+    /// Acervo component ID for VAE weights.
+    public let componentId: String              // e.g., "sdxl-vae-decoder-fp16"
+    /// Number of latent channels the decoder expects.
+    public let latentChannels: Int              // 4
+    /// VAE latent scaling factor (applied internally by the decoder).
+    public let scalingFactor: Float             // 0.13025
+}
+```
+
+**ImageRenderer.Configuration**: `Void` — stateless, no configuration needed.
+
+**AudioRenderer.Configuration**: `Void` — stateless, no configuration needed.
+
+### R4.6 Catalog Component Acervo Descriptors
+
+TuberíaCatalog self-registers the following `ComponentDescriptor` entries at import time. These are the **authoritative** definitions. Model plugins that also register the same component IDs will be silently deduplicated by Acervo (same ID + same repo = no-op).
+
+| Acervo ID | Type | HuggingFace Repo | Key Files | Est. Size |
+|---|---|---|---|---|
+| `t5-xxl-encoder-int4` | encoder | `intrusive-memory/t5-xxl-int4-mlx` | `*.safetensors`, `tokenizer.json`, `tokenizer_config.json`, `config.json` | ~1.2 GB |
+| `sdxl-vae-decoder-fp16` | decoder | `intrusive-memory/sdxl-vae-fp16-mlx` | `*.safetensors`, `config.json` | ~160 MB |
+
+**Repo naming convention**: Shared catalog components use `intrusive-memory/{model}-{quantization}-mlx`. These HuggingFace repos are created during weight conversion (pixart-swift-mlx P7 or a shared conversion step) and populated with MLX safetensors, tokenizer files, and a `config.json` marker.
+
+**DPM-Solver++ and FlowMatchEuler** have no weights — they are pure math. No Acervo component needed.
+
+**ImageRenderer and AudioRenderer** have no weights. No Acervo component needed.
+
+**SHA-256 checksums**: Populated after weight conversion produces the final artifacts. Initial registration may use `sha256: nil` (skip verification) until checksums are computed and backfilled.
 
 ---
 
@@ -838,10 +916,11 @@ LoRA support is split between the pipeline and model plugins.
 - LoRA unloading (restore base weights)
 
 **Model plugins provide**:
-- Declaration of which layers accept LoRA adapters (target layer paths)
-- Any model-specific LoRA key mapping
+- LoRA key mapping — the backbone's `keyMapping` already handles safetensors key → module key translation, and LoRA adapters follow the same key namespace (e.g., `blocks.0.attn.q_proj.lora_A`, `blocks.0.attn.q_proj.lora_B`)
 
-This separation means a new model gets LoRA support by declaring its target layers — no new LoRA loading code.
+**LoRA application strategy**: SwiftTubería applies LoRA adapters to **all keys present in the LoRA safetensors file** that match keys in the loaded model. No explicit target layer declaration is needed — the LoRA file itself defines which layers are adapted. The backbone's `keyMapping` is reused to translate LoRA key names to module paths. This matches the standard LoRA convention and requires zero per-model LoRA code beyond the key mapping already provided for base weights.
+
+This separation means a new model gets LoRA support by providing its key mapping — no new LoRA loading code.
 
 ```swift
 /// Configuration for a LoRA adapter. Referenced by `DiffusionGenerationRequest.loRA`.
@@ -1115,6 +1194,10 @@ public protocol TextEncoder: WeightedSegment {
     /// and any non-weight resources (e.g., tokenizer component ID).
     associatedtype Configuration: Sendable
 
+    /// Construct the encoder from its configuration. The pipeline calls this
+    /// during `DiffusionPipeline.init(recipe:)` to instantiate the component.
+    init(configuration: Configuration) throws
+
     /// Embedding dimension of the encoder output. Used for assembly-time validation
     /// against `Backbone.expectedConditioningDim`.
     var outputEmbeddingDim: Int { get }
@@ -1150,6 +1233,10 @@ public struct SchedulerPlan: Sendable {
 public protocol Scheduler: Sendable {
     /// Configuration type for scheduler initialization.
     associatedtype Configuration: Sendable
+
+    /// Construct the scheduler from its configuration. The pipeline calls this
+    /// during `DiffusionPipeline.init(recipe:)` to instantiate the component.
+    init(configuration: Configuration)
 
     /// Compute the timestep schedule for a generation run.
     /// - Parameters:
@@ -1208,6 +1295,10 @@ public protocol Backbone: WeightedSegment {
     /// Configuration type — must include the Acervo component ID for weights.
     associatedtype Configuration: Sendable
 
+    /// Construct the backbone from its configuration. The pipeline calls this
+    /// during `DiffusionPipeline.init(recipe:)` to instantiate the component.
+    init(configuration: Configuration) throws
+
     /// Expected embedding dimension from the connected TextEncoder.
     /// Validated at assembly: must equal `TextEncoder.outputEmbeddingDim`.
     var expectedConditioningDim: Int { get }
@@ -1258,6 +1349,10 @@ public protocol Decoder: WeightedSegment {
     /// Configuration type — must include the Acervo component ID for weights.
     associatedtype Configuration: Sendable
 
+    /// Construct the decoder from its configuration. The pipeline calls this
+    /// during `DiffusionPipeline.init(recipe:)` to instantiate the component.
+    init(configuration: Configuration) throws
+
     /// Expected number of latent channels from the connected Backbone.
     /// Validated at assembly: must equal `Backbone.outputLatentChannels`.
     var expectedInputChannels: Int { get }
@@ -1306,8 +1401,12 @@ public struct VideoFrames: Sendable {
 }
 
 public protocol Renderer: Sendable {
-    /// Configuration type (often `Void` for stateless renderers).
+    /// Configuration type (`Void` for stateless renderers like ImageRenderer).
     associatedtype Configuration: Sendable
+
+    /// Construct the renderer from its configuration. The pipeline calls this
+    /// during `DiffusionPipeline.init(recipe:)` to instantiate the component.
+    init(configuration: Configuration)
 
     /// Render decoded output into the final format.
     func render(_ input: DecodedOutput) throws -> RenderedOutput
@@ -1458,8 +1557,12 @@ public actor DiffusionPipeline<E: TextEncoder, S: Scheduler, B: Backbone, D: Dec
                          progress: @Sendable (PipelineProgress) -> Void) async throws -> Result
     public func loadModels(progress: @Sendable (Double, String) -> Void) async throws
     public func unloadModels() async
-    public var memoryRequirement: MemoryRequirement { get }
-    public var isLoaded: Bool { get }
+
+    /// Memory requirements — computed from static config, safe to access without `await`.
+    nonisolated public var memoryRequirement: MemoryRequirement { get }
+    /// Whether all weighted segments currently have weights loaded.
+    /// Computed from immutable recipe data + segment isLoaded flags.
+    nonisolated public var isLoaded: Bool { get }
 }
 
 // MARK: - Progress & Errors
@@ -1547,4 +1650,86 @@ public struct DeviceCapability: Sendable {
         case macOS, iPadOS
     }
 }
+```
+
+### R16.4 Catalog Component Configuration Types
+
+These types live in the `TuberíaCatalog` target. Model plugin recipes reference them.
+
+```swift
+// MARK: - T5XXLEncoder Configuration
+
+public struct T5XXLEncoderConfiguration: Sendable {
+    /// Acervo component ID for weights AND tokenizer (bundled together).
+    public let componentId: String
+    /// Maximum sequence length for tokenization.
+    public let maxSequenceLength: Int
+    /// Embedding dimension (informational — always 4096 for T5-XXL).
+    public let embeddingDim: Int
+
+    public init(componentId: String = "t5-xxl-encoder-int4",
+                maxSequenceLength: Int = 120,
+                embeddingDim: Int = 4096) {
+        self.componentId = componentId
+        self.maxSequenceLength = maxSequenceLength
+        self.embeddingDim = embeddingDim
+    }
+}
+
+// MARK: - DPMSolverScheduler Configuration
+
+public struct DPMSolverSchedulerConfiguration: Sendable {
+    /// Beta schedule defining the noise schedule.
+    public let betaSchedule: BetaSchedule
+    /// What the model predicts.
+    public let predictionType: PredictionType
+    /// Solver order (1 = first-order Euler, 2 = second-order midpoint).
+    public let solverOrder: Int
+    /// Total training timesteps (for beta schedule computation).
+    public let trainTimesteps: Int
+
+    public init(betaSchedule: BetaSchedule = .linear(betaStart: 0.0001, betaEnd: 0.02),
+                predictionType: PredictionType = .epsilon,
+                solverOrder: Int = 2,
+                trainTimesteps: Int = 1000) {
+        self.betaSchedule = betaSchedule
+        self.predictionType = predictionType
+        self.solverOrder = solverOrder
+        self.trainTimesteps = trainTimesteps
+    }
+}
+
+// MARK: - FlowMatchEulerScheduler Configuration
+
+public struct FlowMatchEulerSchedulerConfiguration: Sendable {
+    /// Shift parameter for the sigma schedule.
+    public let shift: Float
+
+    public init(shift: Float = 1.0) {
+        self.shift = shift
+    }
+}
+
+// MARK: - SDXLVAEDecoder Configuration
+
+public struct SDXLVAEDecoderConfiguration: Sendable {
+    /// Acervo component ID for VAE weights.
+    public let componentId: String
+    /// Number of latent channels the decoder expects.
+    public let latentChannels: Int
+    /// VAE latent scaling factor (applied internally by the decoder).
+    public let scalingFactor: Float
+
+    public init(componentId: String = "sdxl-vae-decoder-fp16",
+                latentChannels: Int = 4,
+                scalingFactor: Float = 0.13025) {
+        self.componentId = componentId
+        self.latentChannels = latentChannels
+        self.scalingFactor = scalingFactor
+    }
+}
+
+// MARK: - Renderer Configurations
+// ImageRenderer.Configuration = Void (stateless, no configuration needed)
+// AudioRenderer.Configuration = Void (stateless, no configuration needed)
 ```
