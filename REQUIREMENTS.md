@@ -64,6 +64,16 @@ A diffusion pipeline also includes a **Scheduler** segment that drives the backb
 
 ---
 
+## How to Read This Document
+
+Sections R2 through R15 describe the **design rationale, architecture, and requirements** using prose, diagrams, and illustrative pseudocode. They explain *why* each decision was made and *how* the pieces fit together.
+
+Section R16 contains the **canonical Swift protocol definitions** — the complete, copy-paste-ready source for every public protocol, struct, and enum that crosses a repository boundary. **R16 is the contract.** If any code snippet in R2–R15 differs from R16, **R16 governs**.
+
+**For implementing agents**: Read R2–R15 for context and design intent. Use R16 for exact method signatures, type definitions, and protocol conformance requirements.
+
+---
+
 ## R1. Platforms
 
 ```swift
@@ -80,7 +90,7 @@ Each protocol defines a pipe segment with typed inlet/outlet. The boundary contr
 
 ### R2.0 Shared Lifecycle: WeightedSegment
 
-Pipe segments that carry model weights (TextEncoder, Backbone, Decoder) share a common lifecycle. The pipeline loads weights centrally via `WeightLoader` and delivers them to segments through this protocol:
+Pipe segments that carry model weights (TextEncoder, Backbone, Decoder) share a common lifecycle. The pipeline loads weights centrally via `WeightLoader` and delivers them to segments through this protocol. *(Canonical Swift definitions: see R16.1)*
 
 ```swift
 /// Remapped, quantized parameter tensors ready for module assignment.
@@ -181,7 +191,7 @@ No pipe segment ever touches Acervo, URLs, or safetensors parsing. The WeightLoa
 
 ### R2.1 TextEncoder
 
-Converts raw text into dense embeddings that condition the generation.
+Converts raw text into dense embeddings that condition the generation. *(Canonical Swift: see R16.1)*
 
 ```
 inlet:  TextEncoderInput  { text: String, maxLength: Int }
@@ -195,24 +205,18 @@ Different models use different text encoders (T5-XXL for PixArt, Qwen3 for FLUX 
 
 ### R2.2 Scheduler
 
-Drives the iterative denoising loop for diffusion models. Stateful within a single generation, stateless between generations.
+Drives the iterative denoising loop for diffusion models. Stateful within a single generation, stateless between generations. *(Canonical Swift definitions: see R16.1)*
 
 ```
-inlet:  SchedulerConfig   { steps: Int, guidanceScale: Float, betaSchedule: BetaSchedule?, predictionType: PredictionType }
-outlet: SchedulerPlan     { timesteps: [Int], sigmas: [Float] }
+inlet:  steps: Int, startTimestep: Int?     (startTimestep is nil for text-to-image, set for img2img)
+outlet: SchedulerPlan { timesteps: [Int], sigmas: [Float] }
 
 per-step:
-  inlet:  SchedulerStepInput  { modelOutput: MLXArray, timestep: Int, sample: MLXArray }
+  inlet:  output: MLXArray, timestep: Int, sample: MLXArray
   outlet: MLXArray             (denoised sample)
 ```
 
-```swift
-public enum BetaSchedule {
-    case linear(betaStart: Float, betaEnd: Float)
-    case cosine
-    case sqrt
-}
-```
+Configuration parameters like `guidanceScale`, `betaSchedule`, and `predictionType` are provided via the `Scheduler.Configuration` associated type at initialization, not passed per-call to `configure()`.
 
 `betaSchedule` is optional — DDPM-family schedulers (DPM-Solver++, DDPM) require it; flow-matching schedulers (FlowMatchEuler) ignore it and use sigma schedules instead.
 
@@ -234,7 +238,7 @@ public enum PredictionType: String, Sendable {
 
 ### R2.3 Backbone
 
-The model-specific neural network — the ONLY component that model plugin packages must implement from scratch. Everything else is either shared or selected from the catalog.
+The model-specific neural network — the ONLY component that model plugin packages must implement from scratch. Everything else is either shared or selected from the catalog. *(Canonical Swift: see R16.1)*
 
 ```
 inlet:  BackboneInput {
@@ -254,7 +258,7 @@ The backbone protocol is intentionally minimal. It takes conditioned latents and
 
 ### R2.4 Decoder
 
-Converts the backbone's output space into a decoded representation (pixels, audio samples, video frames).
+Converts the backbone's output space into a decoded representation (pixels, audio samples, video frames). *(Canonical Swift: see R16.1)*
 
 ```
 inlet:  MLXArray           // latents from final denoising step
@@ -318,7 +322,7 @@ The backbone never sees reference images or knows the generation mode. It receiv
 
 ### R2.5 Renderer
 
-Converts decoded MLXArray data into the final output format. Pure data transformation — no model weights, no GPU. This is where MLXArray becomes CGImage, WAV Data, or video frames.
+Converts decoded MLXArray data into the final output format. Pure data transformation — no model weights, no GPU. This is where MLXArray becomes CGImage, WAV Data, or video frames. *(Canonical Swift: see R16.1)*
 
 ```
 inlet:  DecodedOutput      // from Decoder outlet
@@ -366,7 +370,7 @@ Each connection point has a **shape contract** that is validated at pipeline ass
 
 A Pipeline is an assembled, validated chain of pipe segments. The pipeline manages the lifecycle of all its components and orchestrates the generation flow.
 
-### R3.1 Pipeline Protocol
+### R3.1 Pipeline Protocol *(Canonical Swift: see R16.2)*
 
 ```swift
 public protocol GenerationPipeline: Sendable {
@@ -392,7 +396,7 @@ public struct MemoryRequirement {
 
 MemoryManager compares `peakMemoryBytes` to available device memory. If insufficient, it falls back to phased loading using `phasedMemoryBytes`. Consumers (e.g., SwiftVinetas engines) use this for memory validation UI.
 
-### R3.2 DiffusionPipeline
+### R3.2 DiffusionPipeline *(Canonical Swift: see R16.2)*
 
 The standard pipeline for all diffusion-based generation (images, video, non-speech audio). Composed from five pipe segments:
 
@@ -475,7 +479,7 @@ This mapping is internal to the pipeline — neither the encoder nor the backbon
 
 The backbone sees the same interface in both modes — it is never aware of the generation mode.
 
-### R3.3 Pipeline Recipes
+### R3.3 Pipeline Recipes *(Canonical Swift: see R16.2)*
 
 A recipe declares which pipe segments to connect. Model plugins provide recipes:
 
@@ -660,7 +664,7 @@ SwiftTubería addresses models exclusively through Acervo's abstractions:
 
 Pipeline code never constructs file paths, HuggingFace URLs, or hardcoded repo strings. If Acervo changes its storage layout, caching strategy, or download source — no pipeline code changes.
 
-### R5.2 Weight Loader
+### R5.2 Weight Loader *(Canonical Swift: see R16.3)*
 
 Loads safetensors files into `ModuleParameters` (see R2.0) with key remapping, tensor transforms, and quantization. The single centralized loading path — no pipe segment ever parses safetensors or accesses files directly.
 
@@ -701,7 +705,7 @@ The WeightLoader obtains file access through `AcervoManager.shared.withComponent
 
 Model plugins provide their key mapping and optional tensor transform via `WeightedSegment` conformance. The WeightLoader does all the mechanical work. Pipe segments receive clean `ModuleParameters` through `apply(weights:)` and never touch file I/O.
 
-### R5.3 Memory Manager
+### R5.3 Memory Manager *(Canonical Swift: see R16.3)*
 
 Coordinates memory across all loaded pipe segments. Global singleton actor.
 
@@ -769,7 +773,7 @@ Detection uses `sysctlbyname("machdep.cpu.brand_string")`. Neural Accelerator de
 
 **Access patterns**: `DeviceCapability.current` is the **synchronous** static property — it reads hardware info once and caches. This is the recommended accessor for all consumers. `MemoryManager.shared.deviceCapability` provides the same value through the actor for contexts that already have an actor reference, but requires `await`. For synchronous contexts (e.g., `EngineRouter` deciding which engines to register), use `DeviceCapability.current` directly — no actor hop needed.
 
-### R5.4 Progress Reporter
+### R5.4 Progress Reporter *(Canonical Swift: see R16.2)*
 
 Unified progress reporting for all pipeline operations.
 
@@ -823,7 +827,7 @@ What a model plugin package (e.g., pixart-swift-mlx, flux-2-swift-mlx) must prov
 
 ---
 
-## R7. LoRA System
+## R7. LoRA System *(Canonical Swift for LoRAConfig: see R16.2)*
 
 LoRA support is split between the pipeline and model plugins.
 
@@ -859,7 +863,7 @@ public struct LoRAConfig: Sendable {
 
 ---
 
-## R8. Error Model
+## R8. Error Model *(Canonical Swift: see R16.2)*
 
 Errors are scoped to the pipe segment that produces them, with a pipeline-level wrapper.
 
