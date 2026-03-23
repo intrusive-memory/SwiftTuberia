@@ -1,6 +1,6 @@
-# Generation Paths — Before & After SwiftTubería
+# Generation Paths — Before & After SwiftTuberia
 
-**Purpose**: Map every generation path through SwiftVoxAlta and SwiftVinetas, showing what changes and what stays the same when SwiftTubería is introduced.
+**Purpose**: Map every generation path through SwiftVoxAlta and SwiftVinetas, showing what changes and what stays the same when SwiftTuberia is introduced.
 
 ---
 
@@ -11,7 +11,7 @@ SwiftVoxAlta uses **autoregressive TTS** (token-by-token generation) — it adop
 
 ```
                     ┌─────────────────────────────┐
-                    │       SwiftTubería       │
+                    │       SwiftTuberia       │
                     │                              │
                     │  ┌────────────────────────┐  │
                     │  │   DiffusionPipeline     │  │◄── SwiftVinetas uses this
@@ -139,7 +139,7 @@ User: diga "Hello world" -v my_custom_voice
 
 ---
 
-### 1b. AFTER (With SwiftTubería Infrastructure)
+### 1b. AFTER (With SwiftTuberia Infrastructure)
 
 ```
 User: diga "Hello world" -v ryan
@@ -344,7 +344,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 
 ---
 
-### 2b. AFTER (With SwiftTubería)
+### 2b. AFTER (With SwiftTuberia)
 
 ```
 User: vinetas generate "A cat in a hat" --model klein4b
@@ -386,7 +386,7 @@ User: vinetas generate "A cat in a hat" --model klein4b
 │     ▼                                                                 │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  DiffusionPipeline<Qwen3, FlowMatch, FluxDiT, FluxVAE, Img>│    │
-│  │  (from SwiftTubería)                                     │    │
+│  │  (from SwiftTuberia)                                     │    │
 │  │                                                              │    │
 │  │  Assembled + validated at construction time                  │    │
 │  │  Shape contracts checked (4096-dim encoder ↔ backbone)       │    │
@@ -476,7 +476,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  SwiftTubería (Tubería product)                              │
+│  SwiftTuberia (Tuberia product)                              │
 │                                                                      │
 │  Protocols:                                                          │
 │  ├─ TextEncoder          (inlet: String → outlet: embeddings+mask)  │
@@ -499,7 +499,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  SwiftTubería (TuberíaCatalog product)                       │
+│  SwiftTuberia (TuberiaCatalog product)                       │
 │                                                                      │
 │  Shared components (tested once, used by many models):               │
 │  ├─ T5XXLEncoder         (4096-dim, ~1.2 GB int4)                   │
@@ -513,7 +513,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  flux-2-swift-mlx (model plugin, depends on Tubería)             │
+│  flux-2-swift-mlx (model plugin, depends on Tuberia)             │
 │                                                                      │
 │  Model-specific (the delta):                                         │
 │  ├─ FluxDiT              (Backbone: double + single stream)         │
@@ -531,7 +531,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  pixart-swift-mlx (model plugin, depends on Tubería+Catalog)     │
+│  pixart-swift-mlx (model plugin, depends on Tuberia+Catalog)     │
 │                                                                      │
 │  Model-specific (the delta):                                         │
 │  ├─ PixArtDiT            (Backbone: 28 blocks, 1152 hidden dim)    │
@@ -546,7 +546,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  SwiftVinetas (consumer, depends on plugins + Tubería)           │
+│  SwiftVinetas (consumer, depends on plugins + Tuberia)           │
 │                                                                      │
 │  UNCHANGED:                                                          │
 │  ├─ VinetasClient        (public API, prompt composition)           │
@@ -567,7 +567,7 @@ User: vinetas generate "A cat" --model pixart-sigma
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  SwiftVoxAlta (infrastructure consumer, depends on Tubería)      │
+│  SwiftVoxAlta (infrastructure consumer, depends on Tuberia)      │
 │                                                                      │
 │  UNCHANGED:                                                          │
 │  ├─ VoxAltaVoiceProvider (SwiftHablare conformance)                 │
@@ -722,9 +722,9 @@ License: Proprietary/non-commercial              License: Apache 2.0
         │     │                                   │
         ▼     ▼                                   │
   ┌─────────────────────────┐                    │
-  │   SwiftTubería      │◄───────────────────┘
-  │   (Tubería +        │   (infrastructure only)
-  │    TuberíaCatalog)  │
+  │   SwiftTuberia      │◄───────────────────┘
+  │   (Tuberia +        │   (infrastructure only)
+  │    TuberiaCatalog)  │
   └───────────┬─────────────┘
               │
               ▼
@@ -734,7 +734,7 @@ License: Proprietary/non-commercial              License: Apache 2.0
   └─────────────────────────┘
 ```
 
-**Arrows mean "depends on"**. VoxAlta depends on SwiftTubería for infrastructure but NOT for the DiffusionPipeline or Catalog. Its TTS engine (mlx-audio-swift) remains a direct dependency.
+**Arrows mean "depends on"**. VoxAlta depends on SwiftTuberia for infrastructure but NOT for the DiffusionPipeline or Catalog. Its TTS engine (mlx-audio-swift) remains a direct dependency.
 
 ---
 

@@ -1,7 +1,7 @@
-# SwiftTubería — Shared Component Catalog
+# SwiftTuberia — Shared Component Catalog
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTubería Overview
-**Scope**: Concrete implementations of pipe segments that are reused across multiple models. These live in the `TuberíaCatalog` target. This document contains both the component specifications and the canonical Swift configuration type definitions.
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
+**Scope**: Concrete implementations of pipe segments that are reused across multiple models. These live in the `TuberiaCatalog` target. This document contains both the component specifications and the canonical Swift configuration type definitions.
 
 ---
 
@@ -112,7 +112,7 @@ public struct SDXLVAEDecoderConfiguration: Sendable {
 
 ## Catalog Component Acervo Descriptors
 
-TuberíaCatalog self-registers the following `ComponentDescriptor` entries at import time. These are the **authoritative** definitions. Model plugins that also register the same component IDs will be silently deduplicated by Acervo (same ID + same repo = no-op).
+TuberiaCatalog self-registers the following `ComponentDescriptor` entries at import time. These are the **authoritative** definitions. Model plugins that also register the same component IDs will be silently deduplicated by Acervo (same ID + same repo = no-op).
 
 | Acervo ID | Type | HuggingFace Repo | Key Files | Est. Size |
 |---|---|---|---|---|
@@ -133,7 +133,7 @@ TuberíaCatalog self-registers the following `ComponentDescriptor` entries at im
 
 These are the **authoritative** configuration type definitions. If any prose above differs from the code below, **this code governs**.
 
-These types live in the `TuberíaCatalog` target. Model plugin recipes reference them.
+These types live in the `TuberiaCatalog` target. Model plugin recipes reference them.
 
 ```swift
 // MARK: - T5XXLEncoder Configuration

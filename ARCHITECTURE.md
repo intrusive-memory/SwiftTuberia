@@ -1,4 +1,4 @@
-# SwiftTubería — Architecture (Ecosystem Interface Reference)
+# SwiftTuberia — Architecture (Ecosystem Interface Reference)
 
 **Companion to**: [`REQUIREMENTS.md`](REQUIREMENTS.md)
 **Role in ecosystem**: Central pipeline system. Provides protocols, infrastructure, and shared components.
@@ -8,11 +8,11 @@
 ## Dependency Position
 
 ```
-pixart-swift-mlx ──▶ Tubería + TuberíaCatalog
-SwiftVinetas ──────▶ Tubería + TuberíaCatalog
-SwiftVoxAlta ──────▶ Tubería only (infrastructure)
-Tubería ───────────▶ SwiftAcervo, mlx-swift, swift-transformers
-TuberíaCatalog ────▶ Tubería
+pixart-swift-mlx ──▶ Tuberia + TuberiaCatalog
+SwiftVinetas ──────▶ Tuberia + TuberiaCatalog
+SwiftVoxAlta ──────▶ Tuberia only (infrastructure)
+Tuberia ───────────▶ SwiftAcervo, mlx-swift, swift-transformers
+TuberiaCatalog ────▶ Tuberia
 ```
 
 ---
@@ -21,10 +21,10 @@ TuberíaCatalog ────▶ Tubería
 
 | Product | Target | Contains | Imported By |
 |---|---|---|---|
-| `Tubería` | Protocols + Infrastructure | Pipe segment protocols, WeightLoader, MemoryManager, DeviceCapability, DiffusionPipeline, PipelineRecipe, LoRA, Progress, Errors | All consumers |
-| `TuberíaCatalog` | Shared Components | T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, FlowMatchEulerScheduler, ImageRenderer, AudioRenderer + their Configuration types | Model plugins, SwiftVinetas |
+| `Tuberia` | Protocols + Infrastructure | Pipe segment protocols, WeightLoader, MemoryManager, DeviceCapability, DiffusionPipeline, PipelineRecipe, LoRA, Progress, Errors | All consumers |
+| `TuberiaCatalog` | Shared Components | T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, FlowMatchEulerScheduler, ImageRenderer, AudioRenderer + their Configuration types | Model plugins, SwiftVinetas |
 
-**SwiftVoxAlta imports only `Tubería`** — it uses MemoryManager and DeviceCapability but no diffusion components.
+**SwiftVoxAlta imports only `Tuberia`** — it uses MemoryManager and DeviceCapability but no diffusion components.
 
 ---
 
@@ -41,7 +41,7 @@ TuberíaCatalog ────▶ Tubería
 
 ## Key Exported Types Summary
 
-### From `Tubería` target
+### From `Tuberia` target
 
 **Protocols**: `TextEncoder`, `Scheduler`, `Backbone`, `Decoder`, `Renderer`, `BidirectionalDecoder`, `WeightedSegment`, `GenerationPipeline`, `PipelineRecipe`
 
@@ -53,7 +53,7 @@ TuberíaCatalog ────▶ Tubería
 
 **Enums**: `QuantizationConfig`, `BetaSchedule`, `PredictionType`, `UnconditionalEmbeddingStrategy`, `PipelineRole`, `ComponentType` (re-exported from Acervo)
 
-### From `TuberíaCatalog` target
+### From `TuberiaCatalog` target
 
 **Components**: `T5XXLEncoder`, `SDXLVAEDecoder`, `DPMSolverScheduler`, `FlowMatchEulerScheduler`, `ImageRenderer`, `AudioRenderer`
 
@@ -64,7 +64,7 @@ TuberíaCatalog ────▶ Tubería
 ## Data Flow Through the System
 
 ```
-Model Plugin                    SwiftTubería                         SwiftAcervo
+Model Plugin                    SwiftTuberia                         SwiftAcervo
 ─────────────                   ────────────                         ───────────
 
 PipelineRecipe ──────────────▶ DiffusionPipeline.init(recipe:)

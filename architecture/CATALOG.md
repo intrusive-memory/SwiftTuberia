@@ -1,7 +1,7 @@
-# SwiftTubería — Catalog Architecture
+# SwiftTuberia — Catalog Architecture
 
 **Companion to**: [`../requirements/CATALOG.md`](../requirements/CATALOG.md)
-**Target**: `TuberíaCatalog`
+**Target**: `TuberiaCatalog`
 
 ---
 
@@ -89,7 +89,7 @@ struct SDXLVAEDecoderConfiguration: Sendable {
 
 ## Acervo Self-Registration
 
-TuberíaCatalog registers shared component descriptors at import time:
+TuberiaCatalog registers shared component descriptors at import time:
 
 | Acervo ID | Type | HuggingFace Repo | Key Files |
 |---|---|---|---|

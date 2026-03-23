@@ -1,6 +1,6 @@
-# SwiftTubería — Pipeline Composition
+# SwiftTuberia — Pipeline Composition
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTubería Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Pipeline protocol, DiffusionPipeline orchestration, recipe system, two-phase loading, LoRA support, error model, and all pipeline-level types. This document contains both the design rationale and the canonical Swift definitions.
 
 ---
@@ -132,20 +132,20 @@ Each recipe also declares its `unconditionalEmbeddingStrategy: UnconditionalEmbe
 
 **Example — PixArt recipe**:
 ```
-Encoder:   T5XXLEncoder          (from SwiftTubería catalog)
-Scheduler: DPMSolverScheduler    (from SwiftTubería catalog)
+Encoder:   T5XXLEncoder          (from SwiftTuberia catalog)
+Scheduler: DPMSolverScheduler    (from SwiftTuberia catalog)
 Backbone:  PixArtDiT             (from pixart-swift-mlx — the ONLY new code)
-Decoder:   SDXLVAEDecoder        (from SwiftTubería catalog)
-Renderer:  ImageRenderer         (from SwiftTubería catalog)
+Decoder:   SDXLVAEDecoder        (from SwiftTuberia catalog)
+Renderer:  ImageRenderer         (from SwiftTuberia catalog)
 ```
 
 **Illustrative — FLUX.2 Klein recipe** (deferred, shown for design validation):
 ```
 Encoder:   Qwen3TextEncoder      (from flux-2-swift-mlx)
-Scheduler: FlowMatchEulerScheduler (from SwiftTubería catalog)
+Scheduler: FlowMatchEulerScheduler (from SwiftTuberia catalog)
 Backbone:  FluxDiT               (from flux-2-swift-mlx — the unique architecture)
 Decoder:   FluxVAEDecoder        (from flux-2-swift-mlx)
-Renderer:  ImageRenderer         (from SwiftTubería catalog)
+Renderer:  ImageRenderer         (from SwiftTuberia catalog)
 ```
 
 ### DiffusionPipeline Construction API
@@ -189,7 +189,7 @@ LoRA adapters are identified via `LoRAConfig`. The config accepts either an Acer
 
 LoRA support is split between the pipeline and model plugins.
 
-**SwiftTubería provides**:
+**SwiftTuberia provides**:
 - LoRA weight loading from safetensors
 - LoRA application mechanics (merge adapter weights into base weights)
 - LoRA scaling (0.0–1.0)
@@ -198,7 +198,7 @@ LoRA support is split between the pipeline and model plugins.
 **Model plugins provide**:
 - LoRA key mapping — the backbone's `keyMapping` already handles safetensors key → module key translation, and LoRA adapters follow the same key namespace (e.g., `blocks.0.attn.q_proj.lora_A`, `blocks.0.attn.q_proj.lora_B`)
 
-**LoRA application strategy**: SwiftTubería applies LoRA adapters to **all keys present in the LoRA safetensors file** that match keys in the loaded model. No explicit target layer declaration is needed — the LoRA file itself defines which layers are adapted. The backbone's `keyMapping` is reused to translate LoRA key names to module paths. This matches the standard LoRA convention and requires zero per-model LoRA code beyond the key mapping already provided for base weights.
+**LoRA application strategy**: SwiftTuberia applies LoRA adapters to **all keys present in the LoRA safetensors file** that match keys in the loaded model. No explicit target layer declaration is needed — the LoRA file itself defines which layers are adapted. The backbone's `keyMapping` is reused to translate LoRA key names to module paths. This matches the standard LoRA convention and requires zero per-model LoRA code beyond the key mapping already provided for base weights.
 
 This separation means a new model gets LoRA support by providing its key mapping — no new LoRA loading code.
 
@@ -257,7 +257,7 @@ public enum PipelineProgress: Sendable {
 
 These are the **authoritative** pipeline type definitions. If any prose above differs from the code below, **this code governs**.
 
-All types below are `public` and live in the `Tubería` target.
+All types below are `public` and live in the `Tuberia` target.
 
 ```swift
 // MARK: - Pipeline Protocol

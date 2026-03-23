@@ -1,6 +1,6 @@
-# SwiftTubería — Pipe Segment Protocols
+# SwiftTuberia — Pipe Segment Protocols
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTubería Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Typed pipe segment protocols that define the inlet/outlet contracts for every component in a generation pipeline. This document contains both the design rationale and the canonical Swift definitions.
 
 ---
@@ -181,7 +181,7 @@ Each connection point has a **shape contract** that is validated at pipeline ass
 
 These are the **authoritative** protocol definitions. If any prose or pseudocode above differs from the code below, **this code governs**.
 
-All protocols, structs, and enums below are `public` and live in the `Tubería` target.
+All protocols, structs, and enums below are `public` and live in the `Tuberia` target.
 
 ```swift
 import MLX

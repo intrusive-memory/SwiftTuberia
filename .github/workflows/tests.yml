@@ -24,13 +24,13 @@ jobs:
         run: |
           xcodebuild build \
             -scheme Tuberia \
-            -destination 'platform=macOS'
+            -destination 'platform=macOS,arch=arm64'
 
       - name: Test
         run: |
           xcodebuild test \
-            -scheme Tuberia \
-            -destination 'platform=macOS'
+            -scheme SwiftTuberia-Package \
+            -destination 'platform=macOS,arch=arm64'
 
   test-ios:
     name: Test on iOS Simulator
@@ -46,11 +46,11 @@ jobs:
       - name: Build for iOS
         run: |
           xcodebuild build-for-testing \
-            -scheme Tuberia \
+            -scheme SwiftTuberia-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
 
       - name: Test on iOS
         run: |
           xcodebuild test-without-building \
-            -scheme Tuberia \
+            -scheme SwiftTuberia-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'

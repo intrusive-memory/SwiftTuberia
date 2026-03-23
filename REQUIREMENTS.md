@@ -1,7 +1,7 @@
-# SwiftTubería — Requirements (Overview)
+# SwiftTuberia — Requirements (Overview)
 
 **Status**: DRAFT — debate and refine before implementation.
-**Parent project**: [`PROJECT_PIPELINE.md`](../PROJECT_PIPELINE.md) — Unified MLX Inference Architecture (§2. SwiftTubería, Waves 1–2)
+**Parent project**: [`PROJECT_PIPELINE.md`](../PROJECT_PIPELINE.md) — Unified MLX Inference Architecture (§2. SwiftTuberia, Waves 1–2)
 **Scope**: Unified, componentized generation stack for MLX inference on Apple Silicon. All model-specific packages (pixart-swift-mlx, flux-2-swift-mlx, future video/audio models) plug into this pipeline rather than building standalone stacks.
 
 ---
@@ -16,15 +16,15 @@ Condition(prompt) → Generate(latents, condition, timesteps) → Decode(raw out
 
 Today, each model repo (flux-2-swift-mlx, pixart-swift-mlx, SwiftVoxAlta) rebuilds this entire stack from scratch — model downloading, weight loading, quantization, memory management, scheduling, VAE decoding, image rendering. The model-specific code (the unique neural network architecture) is typically ~20% of each library; the other ~80% is shared infrastructure rebuilt each time.
 
-SwiftTubería inverts this. It provides the pipeline system and shared components. Model packages provide only the delta — their unique backbone architecture, weight key mapping, and a recipe that declares which pipe segments to connect.
+SwiftTuberia inverts this. It provides the pipeline system and shared components. Model packages provide only the delta — their unique backbone architecture, weight key mapping, and a recipe that declares which pipe segments to connect.
 
-### Design Metaphor: Tubería (Plumbing)
+### Design Metaphor: Tuberia (Plumbing)
 
-*Tubería* is Spanish for "plumbing" or "piping system" — the network of pipes that carries water from source to destination. This is not an analogy. It is a literal description of what this library does.
+*Tuberia* is Spanish for "plumbing" or "piping system" — the network of pipes that carries water from source to destination. This is not an analogy. It is a literal description of what this library does.
 
 A building's plumbing system has standardized pipe segments with typed connections. A half-inch copper inlet connects to a half-inch copper outlet — always. You can test a single pipe segment by running water through it without connecting the entire system. You can swap a corroded segment for a new one without re-plumbing the whole building. A plumber assembles a system from a catalog of standard parts, adding custom fittings only where the building demands something unique.
 
-SwiftTubería works the same way:
+SwiftTuberia works the same way:
 
 - **Pipe segments** are typed components (TextEncoder, Scheduler, Backbone, Decoder, Renderer) with defined inlets and outlets
 - **Recipes** are blueprints — they declare which pipe segments connect to form a complete system
@@ -74,7 +74,7 @@ This overview provides the architectural context, package structure, and impleme
 | [`requirements/PIPELINE.md`](requirements/PIPELINE.md) | DiffusionPipeline orchestration, PipelineRecipe protocol, two-phase loading, LoRA system, error model, progress reporting + canonical Swift definitions | Implementing the pipeline compositor, building a recipe, or understanding the generation flow |
 | [`requirements/CATALOG.md`](requirements/CATALOG.md) | Shared component catalog (T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, etc.) + configuration types + Acervo descriptors + canonical Swift definitions | Implementing a catalog component, or writing a recipe that references catalog components |
 | [`requirements/INFRASTRUCTURE.md`](requirements/INFRASTRUCTURE.md) | WeightLoader, MemoryManager, DeviceCapability, Acervo integration + canonical Swift definitions | Implementing infrastructure services, or understanding how weights are loaded and memory is managed |
-| [`requirements/TESTING.md`](requirements/TESTING.md) | Testing strategy: component tests, contract tests, integration tests, coverage and CI stability requirements | Writing or reviewing tests for any SwiftTubería code |
+| [`requirements/TESTING.md`](requirements/TESTING.md) | Testing strategy: component tests, contract tests, integration tests, coverage and CI stability requirements | Writing or reviewing tests for any SwiftTuberia code |
 
 **Canonical Swift definitions**: Each addendum includes a "Canonical Swift Definitions" section with copy-paste-ready protocol/type source. If any prose or pseudocode differs from the canonical Swift, **the canonical Swift governs**.
 
@@ -95,17 +95,17 @@ macOS and iPadOS (M-series) are first-class targets. This enables lightweight mo
 ```swift
 products: [
     // Core pipeline system — protocols, composition, infrastructure
-    .library(name: "Tubería", targets: ["Tubería"]),
+    .library(name: "Tuberia", targets: ["Tuberia"]),
 
     // Shared component catalog — reusable pipe segments
-    .library(name: "TuberíaCatalog", targets: ["TuberíaCatalog"]),
+    .library(name: "TuberiaCatalog", targets: ["TuberiaCatalog"]),
 ]
 ```
 
-- **`Tubería`** — Protocols, pipeline builder, infrastructure (weight loader, memory manager, progress). Model access via SwiftAcervo. No model-specific code.
-- **`TuberíaCatalog`** — Concrete shared components (T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, FlowMatchEulerScheduler, ImageRenderer, AudioRenderer). Depends on Tubería.
+- **`Tuberia`** — Protocols, pipeline builder, infrastructure (weight loader, memory manager, progress). Model access via SwiftAcervo. No model-specific code.
+- **`TuberiaCatalog`** — Concrete shared components (T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, FlowMatchEulerScheduler, ImageRenderer, AudioRenderer). Depends on Tuberia.
 
-Model plugins depend on `Tubería` (for protocols) and optionally on `TuberíaCatalog` (for shared components they want to reuse). Infrastructure-only consumers (e.g., SwiftVoxAlta) import only `Tubería` — they get MemoryManager and DeviceCapability without pulling in any diffusion components.
+Model plugins depend on `Tuberia` (for protocols) and optionally on `TuberiaCatalog` (for shared components they want to reuse). Infrastructure-only consumers (e.g., SwiftVoxAlta) import only `Tuberia` — they get MemoryManager and DeviceCapability without pulling in any diffusion components.
 
 ---
 
@@ -117,12 +117,12 @@ Model plugins depend on `Tubería` (for protocols) and optionally on `TuberíaCa
 .package(url: "<SwiftAcervo>", from: "2.0.0"),
 ```
 
-SwiftTubería depends on mlx-swift for compute, swift-transformers for tokenization, and SwiftAcervo for all model management. It does NOT depend on any model plugin package — the dependency arrow points inward.
+SwiftTuberia depends on mlx-swift for compute, swift-transformers for tokenization, and SwiftAcervo for all model management. It does NOT depend on any model plugin package — the dependency arrow points inward.
 
 ```
-pixart-swift-mlx ──▶ SwiftTubería ──▶ SwiftAcervo
-SwiftVinetas ──────▶ SwiftTubería ──▶ SwiftAcervo
-SwiftVoxAlta ──────▶ SwiftTubería ──▶ SwiftAcervo
+pixart-swift-mlx ──▶ SwiftTuberia ──▶ SwiftAcervo
+SwiftVinetas ──────▶ SwiftTuberia ──▶ SwiftAcervo
+SwiftVoxAlta ──────▶ SwiftTuberia ──▶ SwiftAcervo
 
 Model plugins also depend on SwiftAcervo directly (for component registration).
 flux-2-swift-mlx is currently standalone (migration deferred).
@@ -150,7 +150,7 @@ What a model plugin package (e.g., pixart-swift-mlx, flux-2-swift-mlx) must prov
 
 6. **Custom Decoder** — Only if the model uses a decoder not in the catalog (e.g., FLUX's specific VAE).
 
-7. **LoRA support** — Model-specific LoRA target layers. The infrastructure for loading/applying LoRA weights is in SwiftTubería (see [PIPELINE.md](requirements/PIPELINE.md)); the plugin declares which layers accept adapters.
+7. **LoRA support** — Model-specific LoRA target layers. The infrastructure for loading/applying LoRA weights is in SwiftTuberia (see [PIPELINE.md](requirements/PIPELINE.md)); the plugin declares which layers accept adapters.
 
 8. **Weight conversion scripts** — Python scripts to convert upstream PyTorch checkpoints to MLX safetensors format.
 
@@ -178,7 +178,7 @@ What a model plugin package (e.g., pixart-swift-mlx, flux-2-swift-mlx) must prov
 
 ## What This Replaces
 
-| Previously In | Now In SwiftTubería | Stays In Original |
+| Previously In | Now In SwiftTuberia | Stays In Original |
 |---|---|---|
 | pixart-swift-mlx | Weight loading, quantization, memory management, image rendering, SDXL VAE, DPM-Solver, T5 encoder | PixArt DiT backbone, weight key mapping |
 | SwiftVoxAlta | Model management, memory management, device detection | VoiceProvider, clone prompts, .vox handling, TTS pipeline specifics |
@@ -190,7 +190,7 @@ What a model plugin package (e.g., pixart-swift-mlx, flux-2-swift-mlx) must prov
 
 ## Implementation Order
 
-1. **Tubería target** — Protocols, infrastructure (weight loader, memory manager, Acervo integration)
+1. **Tuberia target** — Protocols, infrastructure (weight loader, memory manager, Acervo integration)
 2. **DiffusionPipeline** — Generic diffusion orchestrator
 3. **ImageRenderer** — Stateless MLXArray → CGImage (simplest renderer, immediate payoff)
 4. **SDXLVAEDecoder** — First shared decoder (used by PixArt, validates decoder protocol)

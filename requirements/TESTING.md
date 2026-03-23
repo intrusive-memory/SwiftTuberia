@@ -1,7 +1,7 @@
-# SwiftTubería — Testing Strategy
+# SwiftTuberia — Testing Strategy
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTubería Overview
-**Scope**: Testing requirements for both the `Tubería` and `TuberíaCatalog` targets.
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
+**Scope**: Testing requirements for both the `Tuberia` and `TuberiaCatalog` targets.
 
 ---
 
@@ -57,7 +57,7 @@ Full pipeline smoke tests per model (provided by model plugin test suites):
 
 ## Coverage and CI Stability Requirements
 
-- All new code must achieve **≥90% line coverage** in unit tests. Coverage is measured per-target (`Tubería` and `TuberíaCatalog` separately) and enforced in CI.
+- All new code must achieve **≥90% line coverage** in unit tests. Coverage is measured per-target (`Tuberia` and `TuberiaCatalog` separately) and enforced in CI.
 - **No timed tests**: Tests must not use `sleep()`, `Task.sleep()`, `Thread.sleep()`, fixed-duration `XCTestExpectation` timeouts, or any wall-clock assertions. All asynchronous behavior must be validated via deterministic synchronization (`async`/`await`, `AsyncStream`, fulfilled expectations with immediate triggers).
 - **No environment-dependent tests**: Protocol conformance tests, pipeline assembly/validation tests, scheduler math tests, and renderer data-transformation tests must use synthetic inputs and mock components — no real model weights, network access, or GPU required. Tests requiring downloaded models and GPU compute (e.g., T5XXLEncoder encoding, SDXLVAEDecoder PSNR checks) are integration tests and must be clearly separated (separate test target or `#if INTEGRATION_TESTS` gate).
 - **Flaky tests are test failures**: A test that passes intermittently is treated as a failing test until fixed. CI must not use retry-on-failure to mask flakiness.

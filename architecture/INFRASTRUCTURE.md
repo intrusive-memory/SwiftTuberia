@@ -1,7 +1,7 @@
-# SwiftTubería — Infrastructure Architecture
+# SwiftTuberia — Infrastructure Architecture
 
 **Companion to**: [`../requirements/INFRASTRUCTURE.md`](../requirements/INFRASTRUCTURE.md)
-**Target**: `Tubería`
+**Target**: `Tuberia`
 
 ---
 

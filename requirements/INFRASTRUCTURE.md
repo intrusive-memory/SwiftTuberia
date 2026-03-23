@@ -1,17 +1,17 @@
-# SwiftTubería — Infrastructure Services
+# SwiftTuberia — Infrastructure Services
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTubería Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Shared services available to all pipe segments and pipelines — model access via SwiftAcervo, WeightLoader, MemoryManager, DeviceCapability, and Progress Reporter. This document contains both the design rationale and the canonical Swift definitions.
 
 ---
 
 ## Model Access via SwiftAcervo
 
-**SwiftTubería does not have its own model registry.** All model discovery, download, caching, and file access is delegated to SwiftAcervo's Component Registry (see SwiftAcervo REQUIREMENTS.md).
+**SwiftTuberia does not have its own model registry.** All model discovery, download, caching, and file access is delegated to SwiftAcervo's Component Registry (see SwiftAcervo REQUIREMENTS.md).
 
-Model plugins register their `ComponentDescriptor` entries with Acervo at import time. **Catalog components also self-register**: when `TuberíaCatalog` is imported, it registers Acervo descriptors for all shared components (T5-XXL, SDXL VAE, DPM-Solver weights if any, etc.) via the same static `let` initialization pattern. This means a model plugin does NOT need to register catalog components — only its own model-specific components. If both TuberíaCatalog and a model plugin register the same component ID, Acervo deduplicates silently (same ID + same repo = no-op).
+Model plugins register their `ComponentDescriptor` entries with Acervo at import time. **Catalog components also self-register**: when `TuberiaCatalog` is imported, it registers Acervo descriptors for all shared components (T5-XXL, SDXL VAE, DPM-Solver weights if any, etc.) via the same static `let` initialization pattern. This means a model plugin does NOT need to register catalog components — only its own model-specific components. If both TuberiaCatalog and a model plugin register the same component ID, Acervo deduplicates silently (same ID + same repo = no-op).
 
-SwiftTubería addresses models exclusively through Acervo's abstractions:
+SwiftTuberia addresses models exclusively through Acervo's abstractions:
 
 - **Catalog queries**: `Acervo.isComponentReady(id)`, `Acervo.registeredComponents()`
 - **Downloads**: `Acervo.ensureComponentsReady(recipe.allComponentIds)`
@@ -76,7 +76,7 @@ Detection uses `sysctlbyname("machdep.cpu.brand_string")`. Neural Accelerator de
 
 These are the **authoritative** infrastructure type definitions. If any prose above differs from the code below, **this code governs**.
 
-All types below are `public` and live in the `Tubería` target.
+All types below are `public` and live in the `Tuberia` target.
 
 ```swift
 // MARK: - Weight Loader
