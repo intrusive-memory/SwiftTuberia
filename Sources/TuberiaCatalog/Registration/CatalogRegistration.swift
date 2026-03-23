@@ -103,8 +103,8 @@ public final class CatalogRegistration: @unchecked Sendable {
 
         guard !isRegistered else { return }
 
-        register(CatalogRegistration.t5XXLEncoderDescriptor)
-        register(CatalogRegistration.sdxlVAEDecoderDescriptor)
+        registerUnsafe(CatalogRegistration.t5XXLEncoderDescriptor)
+        registerUnsafe(CatalogRegistration.sdxlVAEDecoderDescriptor)
 
         isRegistered = true
     }
@@ -113,7 +113,11 @@ public final class CatalogRegistration: @unchecked Sendable {
     public func register(_ descriptor: ComponentDescriptor) {
         lock.lock()
         defer { lock.unlock() }
+        registerUnsafe(descriptor)
+    }
 
+    /// Internal registration without locking. Caller must hold `lock`.
+    private func registerUnsafe(_ descriptor: ComponentDescriptor) {
         // Deduplicate: same ID = no-op
         if descriptors[descriptor.componentId] != nil {
             return
