@@ -2,6 +2,6 @@
 ///
 /// Provides typed pipe segment protocols, a diffusion pipeline compositor,
 /// and infrastructure services for building MLX-based generation pipelines.
-public enum Tuberia {
+public enum TuberiaLibrary {
   public static let version = "0.1.0"
 }
