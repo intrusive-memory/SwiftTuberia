@@ -11,8 +11,8 @@ struct MemoryManagerTests {
 
     // MARK: - Component Tracking
 
-    @Test("registerLoaded and unregisterLoaded track bytes accurately")
-    func componentTracking() async throws {
+    @Test("register, overwrite, and unregister track bytes accurately")
+    func componentTrackingLifecycle() async throws {
         let manager = MemoryManager.shared
 
         let compA = "track-\(UInt64.random(in: 0...UInt64.max))"
@@ -21,40 +21,20 @@ struct MemoryManagerTests {
         let baseline = await manager.loadedComponentsMemory
 
         await manager.registerLoaded(component: compA, bytes: 1_000_000)
-        let afterA = await manager.loadedComponentsMemory
-        #expect(afterA - baseline == 1_000_000)
+        #expect(await manager.loadedComponentsMemory - baseline == 1_000_000)
 
         await manager.registerLoaded(component: compB, bytes: 2_000_000)
-        let afterAB = await manager.loadedComponentsMemory
-        #expect(afterAB - baseline == 3_000_000)
+        #expect(await manager.loadedComponentsMemory - baseline == 3_000_000)
+
+        // Overwrite compA with different size
+        await manager.registerLoaded(component: compA, bytes: 5_000)
+        #expect(await manager.loadedComponentsMemory - baseline == 2_005_000)
 
         await manager.unregisterLoaded(component: compA)
-        let afterUnloadA = await manager.loadedComponentsMemory
-        #expect(afterUnloadA - baseline == 2_000_000)
+        #expect(await manager.loadedComponentsMemory - baseline == 2_000_000)
 
         await manager.unregisterLoaded(component: compB)
-        let afterUnloadAll = await manager.loadedComponentsMemory
-        #expect(afterUnloadAll == baseline)
-    }
-
-    @Test("registerLoaded overwrites existing entry for same component")
-    func componentTrackingOverwrite() async throws {
-        let manager = MemoryManager.shared
-        let comp = "overwrite-\(UInt64.random(in: 0...UInt64.max))"
-
-        let baseline = await manager.loadedComponentsMemory
-
-        await manager.registerLoaded(component: comp, bytes: 1_000)
-        let after1 = await manager.loadedComponentsMemory
-        #expect(after1 - baseline == 1_000)
-
-        // Re-register with different size should overwrite
-        await manager.registerLoaded(component: comp, bytes: 5_000)
-        let after2 = await manager.loadedComponentsMemory
-        #expect(after2 - baseline == 5_000)
-
-        // Cleanup
-        await manager.unregisterLoaded(component: comp)
+        #expect(await manager.loadedComponentsMemory == baseline)
     }
 
     @Test("unregisterLoaded is idempotent for unknown components")
@@ -68,37 +48,21 @@ struct MemoryManagerTests {
         #expect(before == after)
     }
 
-    // MARK: - Soft Check
+    // MARK: - Budget Checks
 
-    @Test("softCheck returns true when enough memory is available")
-    func softCheckPasses() async throws {
+    @Test("softCheck: true for small request, false for UInt64.max")
+    func softCheckBoundaries() async throws {
         let manager = MemoryManager.shared
-        // Request a very small amount that should always be available
-        let result = await manager.softCheck(requiredBytes: 1)
-        #expect(result == true)
+        #expect(await manager.softCheck(requiredBytes: 1) == true)
+        #expect(await manager.softCheck(requiredBytes: UInt64.max) == false)
     }
 
-    @Test("softCheck returns false when budget would be exceeded")
-    func softCheckFails() async throws {
+    @Test("hardValidate: passes for tiny request, throws for impossible request")
+    func hardValidateBoundaries() async throws {
         let manager = MemoryManager.shared
-        // Request more memory than any machine has
-        let result = await manager.softCheck(requiredBytes: UInt64.max)
-        #expect(result == false)
-    }
 
-    // MARK: - Hard Validate
-
-    @Test("hardValidate passes with reasonable memory requirement")
-    func hardValidatePasses() async throws {
-        let manager = MemoryManager.shared
-        // Request a tiny amount
         try await manager.hardValidate(requiredBytes: 1)
-        // If we reach here, no throw = success
-    }
 
-    @Test("hardValidate throws insufficientMemory when budget exceeded")
-    func hardValidateThrows() async throws {
-        let manager = MemoryManager.shared
         do {
             try await manager.hardValidate(requiredBytes: UInt64.max)
             Issue.record("Expected PipelineError.insufficientMemory")
@@ -115,23 +79,16 @@ struct MemoryManagerTests {
 
     // MARK: - Memory Queries
 
-    @Test("totalMemory returns a positive value")
-    func totalMemoryPositive() async throws {
+    @Test("totalMemory and availableMemory are positive")
+    func memoryQueriesPositive() async throws {
         let manager = MemoryManager.shared
-        let total = await manager.totalMemory
-        #expect(total > 0)
-    }
-
-    @Test("availableMemory returns a positive value")
-    func availableMemoryPositive() async throws {
-        let manager = MemoryManager.shared
-        let available = await manager.availableMemory
-        #expect(available > 0)
+        #expect(await manager.totalMemory > 0)
+        #expect(await manager.availableMemory > 0)
     }
 
     // MARK: - Device Capability
 
-    @Test("deviceCapability returns same value as DeviceCapability.current")
+    @Test("deviceCapability matches DeviceCapability.current")
     func deviceCapabilityConsistency() async throws {
         let manager = MemoryManager.shared
         let fromManager = await manager.deviceCapability
@@ -142,12 +99,11 @@ struct MemoryManagerTests {
         #expect(fromManager.chipGeneration == direct.chipGeneration)
     }
 
-    // MARK: - GPU Cache Clear
+    // MARK: - GPU Cache
 
     @Test("clearGPUCache completes without error")
     func clearGPUCacheNoError() async throws {
         let manager = MemoryManager.shared
         await manager.clearGPUCache()
-        // If we reach here, no crash = success
     }
 }

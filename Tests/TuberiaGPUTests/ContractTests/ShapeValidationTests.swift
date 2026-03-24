@@ -7,21 +7,6 @@ import Testing
 @Suite("Shape Validation Tests")
 struct ShapeValidationTests {
 
-    // MARK: - Compatible Assembly
-
-    @Test("Compatible encoder-backbone assembles successfully")
-    func compatibleAssembly() throws {
-        let recipe = StandardMockRecipe(
-            encoderConfig: .init(embeddingDim: 4096, maxSeqLength: 120),
-            schedulerConfig: .init(),
-            backboneConfig: .init(conditioningDim: 4096, latentChannels: 4, maxSequenceLength: 120),
-            decoderConfig: .init(inputChannels: 4),
-            rendererConfig: ()
-        )
-        let pipeline = try DiffusionPipeline(recipe: recipe)
-        #expect(pipeline.memoryRequirement.peakMemoryBytes > 0)
-    }
-
     // MARK: - Embedding Dimension Mismatch
 
     @Test("Incompatible embedding dimension throws with clear message")

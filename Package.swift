@@ -43,7 +43,15 @@ let package = Package(
             dependencies: ["Tuberia"]
         ),
         .testTarget(
+            name: "TuberiaGPUTests",
+            dependencies: ["Tuberia"]
+        ),
+        .testTarget(
             name: "TuberiaCatalogTests",
+            dependencies: ["TuberiaCatalog"]
+        ),
+        .testTarget(
+            name: "TuberiaCatalogGPUTests",
             dependencies: ["TuberiaCatalog"]
         )
     ],
