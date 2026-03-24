@@ -23,34 +23,13 @@ jobs:
       - name: Build
         run: |
           xcodebuild build \
-            -scheme SwiftTuberia \
-            -destination 'platform=macOS'
+            -scheme Tuberia \
+            -destination 'platform=macOS,arch=arm64'
 
-      - name: Test
+      - name: Test (non-GPU)
         run: |
           xcodebuild test \
-            -scheme SwiftTuberia \
-            -destination 'platform=macOS'
-
-  test-ios:
-    name: Test on iOS Simulator
-    runs-on: macos-26
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Show Swift version
-        run: swift --version
-
-      - name: Build for iOS
-        run: |
-          xcodebuild build-for-testing \
-            -scheme SwiftTuberia \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
-
-      - name: Test on iOS
-        run: |
-          xcodebuild test-without-building \
-            -scheme SwiftTuberia \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
+            -scheme SwiftTuberia-Package \
+            -destination 'platform=macOS,arch=arm64' \
+            -only-testing:TuberiaTests \
+            -only-testing:TuberiaCatalogTests

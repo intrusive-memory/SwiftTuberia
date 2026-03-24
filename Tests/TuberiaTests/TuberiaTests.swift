@@ -1,6 +1,4 @@
 import Testing
 @testable import Tuberia
 
-@Test func placeholder() {
-    // Placeholder — replaced when real components are implemented
-}
+// Placeholder removed -- real tests are in ContractTests/, Mocks/, and individual test files.
