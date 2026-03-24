@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Status**: Pre-implementation -- see [REQUIREMENTS.md](REQUIREMENTS.md) for full specification.
+**Version**: 0.1.0
 
 ---
 
