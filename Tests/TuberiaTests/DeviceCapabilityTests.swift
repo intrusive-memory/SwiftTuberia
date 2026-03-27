@@ -10,7 +10,7 @@ struct DeviceCapabilityTests {
   func currentDeviceCapability() throws {
     let capability = DeviceCapability.current
     #expect(capability.totalMemoryGB > 0)
-    #expect(capability.chipGeneration != .unknown || true)  // May be unknown in CI
+    // chipGeneration may be .unknown in CI; no assertion needed
   }
 
   @Test("Platform detection returns macOS on Mac")
