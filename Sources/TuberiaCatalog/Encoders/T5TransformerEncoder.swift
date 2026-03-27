@@ -244,15 +244,22 @@ public final class T5EncoderBlock: MLXNN.Module {
 ///   and pass it into every encoder block.
 /// - This matches T5's original design where the bias table lives on layer 0 but is shared.
 public final class T5TransformerEncoder: MLXNN.Module {
-    // MARK: Architecture constants
-    static let vocabSize = 32128
-    static let hiddenDim = 4096
-    static let numLayers = 24
-    static let numHeads = 64
-    static let headDim = 64
-    static let ffnDim = 10240
-    static let numBuckets = 32
-    static let maxDistance = 128
+    // MARK: Default architecture constants (T5-XXL production values)
+    static let defaultVocabSize = 32128
+    static let defaultHiddenDim = 4096
+    static let defaultNumLayers = 24
+    static let defaultNumHeads = 64
+    static let defaultHeadDim = 64
+    static let defaultFFNDim = 10240
+    static let defaultNumBuckets = 32
+    static let defaultMaxDistance = 128
+
+    // MARK: Instance architecture dimensions
+    // Stored as instance properties so small-dimension variants (used in tests)
+    // are fully self-contained and do not accidentally use production-sized constants.
+    private let instanceNumHeads: Int
+    private let instanceNumBuckets: Int
+    private let instanceMaxDistance: Int
 
     // MARK: Parameters
 
@@ -276,8 +283,13 @@ public final class T5TransformerEncoder: MLXNN.Module {
         numHeads: Int = 64,
         headDim: Int = 64,
         ffnDim: Int = 10240,
-        numBuckets: Int = 32
+        numBuckets: Int = 32,
+        maxDistance: Int = 128
     ) {
+        self.instanceNumHeads = numHeads
+        self.instanceNumBuckets = numBuckets
+        self.instanceMaxDistance = maxDistance
+
         self.embedding = MLXNN.Embedding(embeddingCount: vocabSize, dimensions: hiddenDim)
         self.blocks = (0..<numLayers).map { _ in
             T5EncoderBlock(
@@ -346,9 +358,9 @@ public final class T5TransformerEncoder: MLXNN.Module {
     /// - Parameter seqLen: Sequence length.
     /// - Returns: Bias tensor [1, num_heads, seq_len, seq_len].
     private func computeRelativePositionBias(seqLen: Int) -> MLXArray {
-        let numBuckets = T5TransformerEncoder.numBuckets
-        let maxDistance = T5TransformerEncoder.maxDistance
-        let numHeads = T5TransformerEncoder.numHeads
+        let numBuckets = instanceNumBuckets
+        let maxDistance = instanceMaxDistance
+        let numHeads = instanceNumHeads
 
         // Build relative positions matrix [seq_len, seq_len]
         // Entry [i, j] = position of key j relative to query i = j - i

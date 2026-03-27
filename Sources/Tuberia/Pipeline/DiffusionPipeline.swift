@@ -171,6 +171,13 @@ public actor DiffusionPipeline<
   ///
   /// Progress callback receives (fraction: Double, component: String).
   public func loadModels(progress: @Sendable (Double, String) -> Void) async throws {
+    // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
+    // This is a non-fatal async step: if tokenizer loading fails, encode() falls
+    // back to placeholder tokenization (per INF-2 Option B lifecycle design).
+    if let tokenizerLoadable = encoder as? any TokenizerLoadable {
+      await tokenizerLoadable.loadTokenizer()
+    }
+
     let weightedSegments:
       [(
         segment: any WeightedSegment, componentId: String?, role: PipelineRole,

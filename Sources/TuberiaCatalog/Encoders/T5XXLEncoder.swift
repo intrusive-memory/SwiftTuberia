@@ -1,6 +1,8 @@
 import Foundation
 @preconcurrency import MLX
 import MLXNN
+import SwiftAcervo
+@preconcurrency import Tokenizers
 import Tuberia
 
 /// T5-XXL text encoder producing 4096-dimensional embeddings.
@@ -21,11 +23,12 @@ import Tuberia
 ///
 /// Tokenizer: Bundled with weights in the same Acervo component. Loaded via
 /// `swift-transformers` `AutoTokenizer.from(modelFolder:)`.
-public final class T5XXLEncoder: TextEncoder, @unchecked Sendable {
+public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Sendable {
   public typealias Configuration = T5XXLEncoderConfiguration
 
   private let configuration: Configuration
   private var transformer: T5TransformerEncoder?
+  private var tokenizer: (any Tokenizer)?
   public private(set) var isLoaded: Bool = false
 
   // T5-XXL architecture constants
@@ -37,9 +40,35 @@ public final class T5XXLEncoder: TextEncoder, @unchecked Sendable {
 
   public required init(configuration: Configuration) throws {
     self.configuration = configuration
-    // Note: In a full implementation, the tokenizer would be loaded here
-    // via `withComponentAccess` + `AutoTokenizer.from(modelFolder:)`.
-    // For the stub, tokenization is handled by the placeholder encode().
+    // Tokenizer is loaded asynchronously via loadTokenizer() during the pipeline
+    // load phase (Option B from INF-2: separate async step, keeping init synchronous).
+  }
+
+  /// Load the T5 tokenizer from the Acervo component directory.
+  ///
+  /// Must be called during the pipeline load phase (e.g. from
+  /// `DiffusionPipeline.loadModels()`) before any `encode()` calls that require
+  /// real tokenization. Falls back to placeholder tokenization if not called.
+  ///
+  /// The tokenizer files (`tokenizer.json`, `tokenizer_config.json`) are bundled
+  /// in the same Acervo component as the weights (component ID configured via
+  /// `configuration.componentId`).
+  public func loadTokenizer() async {
+    do {
+      // Step 1: Obtain the model directory URL synchronously via Acervo.
+      // withModelAccess takes a synchronous closure, so we extract the URL
+      // and call the async AutoTokenizer.from() outside the closure.
+      let modelDir = try await AcervoManager.shared.withModelAccess(configuration.componentId) {
+        directoryURL -> URL in
+        directoryURL
+      }
+      // Step 2: Load the tokenizer asynchronously from the resolved directory.
+      let tok = try await AutoTokenizer.from(modelFolder: modelDir)
+      self.tokenizer = tok
+    } catch {
+      // Non-fatal: encode() falls back to placeholder tokenization when tokenizer is nil.
+      // Errors here are expected in testing environments without real model files.
+    }
   }
 
   /// Internal initializer for testing — accepts a pre-built (possibly small-dimension)
@@ -62,30 +91,97 @@ public final class T5XXLEncoder: TextEncoder, @unchecked Sendable {
   public func encode(_ input: TextEncoderInput) throws -> TextEncoderOutput {
     let seqLen = min(input.maxLength, configuration.maxSequenceLength)
 
+    // --- Tokenization ---
+    // Use real tokenizer when available; fall back to placeholder tokenization.
+    let (tokenIds, numRealTokens) = tokenize(text: input.text, seqLen: seqLen)
+
+    // --- Attention mask ---
+    // 1 for real tokens (indices 0..<numRealTokens), 0 for padding.
+    var maskValues = [Float](repeating: 0.0, count: seqLen)
+    for i in 0..<numRealTokens {
+      maskValues[i] = 1.0
+    }
+    let mask = MLXArray(maskValues).reshaped([1, seqLen])
+
     if isLoaded, let model = transformer {
-      // With real transformer loaded, run the forward pass using placeholder token IDs
-      // until a real tokenizer is wired in (Sortie 3).
-      let estimatedTokens = min(input.text.count / 4 + 1, seqLen)
-      let padTokenId = Int32(0)
-      var tokenIds = [Int32](repeating: padTokenId, count: seqLen)
-      // Fill up to estimatedTokens with placeholder non-zero IDs
-      for i in 0..<min(estimatedTokens, seqLen) {
-        tokenIds[i] = Int32(i + 1)
-      }
+      // Real transformer forward pass.
       let tokenTensor = MLXArray(tokenIds, [1, seqLen])
-
-      var maskValues = [Float](repeating: 0.0, count: seqLen)
-      for i in 0..<min(estimatedTokens, seqLen) {
-        maskValues[i] = 1.0
-      }
-      let mask = MLXArray(maskValues).reshaped([1, seqLen])
-
       let embeddings = model(tokenTensor, attentionMask: mask)
       return TextEncoderOutput(embeddings: embeddings, mask: mask)
     } else {
-      // Unloaded: produce deterministic output for shape testing
-      return placeholderEncode(text: input.text, seqLen: seqLen)
+      // Unloaded: produce correctly shaped placeholder output.
+      let embeddings = MLXArray.zeros([1, seqLen, configuration.embeddingDim])
+      return TextEncoderOutput(embeddings: embeddings, mask: mask)
     }
+  }
+
+  // MARK: - Tokenization Helpers
+
+  /// Tokenize `text` into a padded [Int32] token ID array of length `seqLen`.
+  ///
+  /// Returns the array plus the count of real (non-pad) tokens so the caller
+  /// can construct the attention mask.
+  ///
+  /// When the real tokenizer is loaded, uses it; otherwise falls back to a
+  /// character-based heuristic (placeholder).
+  ///
+  /// T5 tokenization notes:
+  /// - Pad token ID: 0
+  /// - Token IDs are clamped to `seqLen` (truncation)
+  /// - If the text is empty, a single EOS/pad token is produced
+  private func tokenize(text: String, seqLen: Int) -> ([Int32], Int) {
+    if let tok = tokenizer {
+      return tokenizeWithRealTokenizer(tok, text: text, seqLen: seqLen)
+    } else {
+      return placeholderTokenize(text: text, seqLen: seqLen)
+    }
+  }
+
+  /// Tokenize using the loaded swift-transformers tokenizer.
+  private func tokenizeWithRealTokenizer(
+    _ tok: any Tokenizer,
+    text: String,
+    seqLen: Int
+  ) -> ([Int32], Int) {
+    // Handle empty string: produce a single pad token.
+    if text.isEmpty {
+      var ids = [Int32](repeating: 0, count: seqLen)
+      ids[0] = 0  // pad / EOS token
+      return (ids, 1)
+    }
+
+    // Encode the text to token IDs.
+    let rawIds = tok.encode(text: text)
+
+    // Clamp to maxSequenceLength (truncation).
+    let truncated = Array(rawIds.prefix(seqLen))
+    let numRealTokens = truncated.count
+
+    // Pad to seqLen with pad token ID 0.
+    var padded = truncated.map { Int32($0) }
+    while padded.count < seqLen {
+      padded.append(0)
+    }
+
+    return (padded, numRealTokens)
+  }
+
+  /// Placeholder tokenization used when no real tokenizer is available.
+  ///
+  /// Approximates token count using a character-to-token ratio (~4 chars/token).
+  /// Used in testing environments and as a fallback.
+  private func placeholderTokenize(text: String, seqLen: Int) -> ([Int32], Int) {
+    if text.isEmpty {
+      var ids = [Int32](repeating: 0, count: seqLen)
+      ids[0] = 0
+      return (ids, 1)
+    }
+    let estimatedTokens = min(text.count / 4 + 1, seqLen)
+    var ids = [Int32](repeating: 0, count: seqLen)
+    for i in 0..<estimatedTokens {
+      ids[i] = Int32(i + 1)
+    }
+    return (ids, estimatedTokens)
   }
 
   // MARK: - WeightedSegment
@@ -230,27 +326,4 @@ public final class T5XXLEncoder: TextEncoder, @unchecked Sendable {
     self.isLoaded = false
   }
 
-  // MARK: - Private
-
-  /// Placeholder encode that produces correctly shaped output.
-  /// In the full implementation, this would run the T5 transformer encoder.
-  private func placeholderEncode(text: String, seqLen: Int) -> TextEncoderOutput {
-    // Simulate tokenization: produce a sequence of `seqLen` token positions.
-    // Real tokens would come from the tokenizer; here we use the text length
-    // to determine how many tokens are "real" vs padding.
-    let estimatedTokens = min(text.count / 4 + 1, seqLen)  // rough char-to-token ratio
-    let actualSeqLen = seqLen
-
-    // Embeddings: [1, seqLen, embeddingDim] -- placeholder values
-    let embeddings = MLXArray.zeros([1, actualSeqLen, configuration.embeddingDim])
-
-    // Mask: [1, seqLen] -- 1 for real tokens, 0 for padding
-    var maskValues = [Float](repeating: 0.0, count: actualSeqLen)
-    for i in 0..<min(estimatedTokens, actualSeqLen) {
-      maskValues[i] = 1.0
-    }
-    let mask = MLXArray(maskValues).reshaped([1, actualSeqLen])
-
-    return TextEncoderOutput(embeddings: embeddings, mask: mask)
-  }
 }
