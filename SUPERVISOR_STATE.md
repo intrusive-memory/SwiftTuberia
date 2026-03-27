@@ -33,37 +33,37 @@
 ## Work Unit Status
 
 ### T5-XXL Encoder
-- Work unit state: RUNNING
-- Current sortie: 2 of 3
-- Sortie state: DISPATCHED
-- Sortie type: code
-- Model: sonnet
-- Complexity score: 7
-- Attempt: 1 of 3
-- Last verified: Sortie 1 COMPLETED — 5 Module subclasses, build succeeds, commit 2034928
-- Notes: Key mapping + weight loading (~580 keys)
-
-### SDXL VAE Decoder
-- Work unit state: RUNNING
-- Current sortie: 2 of 3
-- Sortie state: DISPATCHED
+- Work unit state: COMPLETED
+- Current sortie: 3 of 3
+- Sortie state: COMPLETED
 - Sortie type: code
 - Model: sonnet
 - Complexity score: 10
 - Attempt: 1 of 3
-- Last verified: Sortie 1 COMPLETED — 6 Module subclasses, build succeeds, commit 89b3e6c
-- Notes: Key mapping + NCHW→NHWC tensor transforms + weight loading (~130 keys)
+- Last verified: Sortie 3 COMPLETED — swift-transformers dep, loadTokenizer(), real encode() path, TokenizerLoadable protocol, 14 tests, commit 15f5e71
+- Notes: All 3 sorties done. T5 transformer architecture + key mapping + tokenizer integration.
+
+### SDXL VAE Decoder
+- Work unit state: RUNNING
+- Current sortie: 3 of 3
+- Sortie state: DISPATCHED
+- Sortie type: code
+- Model: sonnet
+- Complexity score: 8
+- Attempt: 1 of 3
+- Last verified: Sortie 2 COMPLETED — key mapping, tensorTransform, apply(weights:), 66 tests pass, commit a8def03
+- Notes: VAE decoder integration — wire SDXLVAEDecoderModel into decode() path
 
 ### Secondary Features
-- Work unit state: RUNNING
+- Work unit state: COMPLETED
 - Current sortie: 2 of 2
-- Sortie state: DISPATCHED
+- Sortie state: COMPLETED
 - Sortie type: code
 - Model: haiku
 - Complexity score: 4
 - Attempt: 1 of 3
-- Last verified: Sortie 1 COMPLETED — cgImageToMLXArray() implemented, placeholder removed, tests created, commit 7d0480e
-- Notes: FlowMatch robustness — replacing silent fallbacks with errors
+- Last verified: Sortie 2 COMPLETED — silent fallbacks replaced with PipelineError + nearest-timestep snapping, commit f26ded5
+- Notes: Both sorties done. CGImage conversion + FlowMatch robustness.
 
 ### Pipeline LoRA Integration
 - Work unit state: NOT_STARTED
@@ -83,9 +83,9 @@
 | T5-XXL Encoder | 1 | COMPLETED | 1/3 | sonnet | 11 | abd0c4d1e669bdcdf | — | 2026-03-26T00:00 |
 | SDXL VAE Decoder | 1 | COMPLETED | 1/3 | sonnet | 11 | a6baf5a52184e58f5 | — | 2026-03-26T00:00 |
 | Secondary Features | 1 | COMPLETED | 1/3 | haiku | 5 | a9f7dbf5bf999c601 | — | 2026-03-26T00:00 |
-| Secondary Features | 2 | DISPATCHED | 1/3 | haiku | 4 | a12a7440f8b59940d | /private/tmp/claude-501/-Users-stovak-Projects-SwiftTuberia/e8cdd799-1a75-4c84-aad1-0047fd7a1b0f/tasks/a12a7440f8b59940d.output | 2026-03-26T00:01 |
-| T5-XXL Encoder | 2 | DISPATCHED | 1/3 | sonnet | 7 | a7d1ff634cb981014 | /private/tmp/claude-501/-Users-stovak-Projects-SwiftTuberia/e8cdd799-1a75-4c84-aad1-0047fd7a1b0f/tasks/a7d1ff634cb981014.output | 2026-03-26T00:02 |
-| SDXL VAE Decoder | 2 | DISPATCHED | 1/3 | sonnet | 10 | a104b58dcd8237b0b | /private/tmp/claude-501/-Users-stovak-Projects-SwiftTuberia/e8cdd799-1a75-4c84-aad1-0047fd7a1b0f/tasks/a104b58dcd8237b0b.output | 2026-03-26T00:02 |
+| Secondary Features | 2 | COMPLETED | 1/3 | haiku | 4 | a12a7440f8b59940d | — | 2026-03-26T00:01 |
+| T5-XXL Encoder | 2 | COMPLETED | 1/3 | sonnet | 7 | a7d1ff634cb981014 | — | 2026-03-26T00:02 |
+| SDXL VAE Decoder | 2 | COMPLETED | 1/3 | sonnet | 10 | a104b58dcd8237b0b | — | 2026-03-26T00:02 |
 
 ## Decisions Log
 
@@ -100,3 +100,11 @@
 | 2026-03-26T00:02 | SDXL VAE Decoder | 1 | COMPLETED | Verified: 6 Module subclasses, full package builds, commit 89b3e6c |
 | 2026-03-26T00:02 | T5-XXL Encoder | 2 | Model: sonnet | Complexity score 7 (foundation=2, risk=2, turns=3). ~580 key mapping + weight loading |
 | 2026-03-26T00:02 | SDXL VAE Decoder | 2 | Model: sonnet | Complexity score 10 (foundation=2, risk=3, turns=5). ~130 key mapping + NCHW→NHWC tensor transforms |
+| 2026-03-26T00:03 | Secondary Features | 2 | COMPLETED | Verified: silent fallbacks removed, PipelineError thrown, nearest-timestep snapping, protocol updated to throws, commit f26ded5 |
+| 2026-03-26T00:03 | Secondary Features | — | WORK UNIT COMPLETED | Both sorties verified. CGImage conversion + FlowMatch robustness. |
+| 2026-03-26T00:04 | SDXL VAE Decoder | 2 | COMPLETED | Verified: key mapping, tensorTransform, apply(weights:), model property, 66 tests, commit a8def03 |
+| 2026-03-26T00:04 | SDXL VAE Decoder | 3 | Model: sonnet | Complexity score 8 (foundation=0, risk=2, turns=3). Integration wiring — largely mechanical |
+| 2026-03-26T00:05 | T5-XXL Encoder | 2 | COMPLETED | Verified: key mapping, apply(weights:), 11 new tests, commit 7f07aca |
+| 2026-03-26T00:05 | T5-XXL Encoder | 3 | Model: sonnet | Complexity score 10 (foundation=2, risk=4, turns=5). External dep (swift-transformers), async tokenizer, Package.swift mod |
+| 2026-03-26T00:06 | T5-XXL Encoder | 3 | COMPLETED | Verified: swift-transformers dep, loadTokenizer(), tokenizer property, full build succeeds, commit 15f5e71 |
+| 2026-03-26T00:06 | T5-XXL Encoder | — | WORK UNIT COMPLETED | All 3 sorties verified. Architecture + key mapping + tokenizer. |

@@ -53,16 +53,20 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     // Apply internal scaling: latents * (1.0 / scalingFactor)
     let scaledLatents = latents * (1.0 / configuration.scalingFactor)
 
-    // Produce correctly shaped output.
-    // NOTE: The real forward pass (calling model) is wired in Sortie 3.
-    // This placeholder produces the correct output shape for pipeline integration testing.
+    // Run the real forward pass when model weights are loaded;
+    // fall back to a correctly-shaped placeholder when the model is nil.
     let batchSize = shape[0]
     let latentH = shape[1]
     let latentW = shape[2]
     let outputH = latentH * 8
     let outputW = latentW * 8
-    let pixelData = placeholderForwardPass(
-      scaledLatents, outputShape: [batchSize, outputH, outputW, 3])
+    let pixelData: MLXArray
+    if let loadedModel = model {
+      pixelData = loadedModel(scaledLatents)
+    } else {
+      pixelData = placeholderForwardPass(
+        scaledLatents, outputShape: [batchSize, outputH, outputW, 3])
+    }
 
     let metadata = ImageDecoderMetadata(scalingFactor: configuration.scalingFactor)
     return DecodedOutput(data: pixelData, metadata: metadata)

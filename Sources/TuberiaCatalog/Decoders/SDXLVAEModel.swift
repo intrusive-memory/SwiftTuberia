@@ -21,11 +21,24 @@ final class ResnetBlock2D: MLXNN.Module {
     let conv2: MLXNN.Conv2d
     let convShortcut: MLXNN.Conv2d?
 
-    private static let numGroups = 32
+    private static let maxGroups = 32
+
+    /// Computes the largest valid group count for GroupNorm such that
+    /// `groupCount <= maxGroups` and `channels % groupCount == 0`.
+    ///
+    /// This handles the case where the channel count is smaller than `maxGroups`
+    /// (e.g. the first ResNet block in the mid-block operates on 4 latent channels).
+    private static func groupCount(for channels: Int) -> Int {
+        var g = min(maxGroups, channels)
+        while g > 1 && channels % g != 0 {
+            g -= 1
+        }
+        return g
+    }
 
     init(inChannels: Int, outChannels: Int) {
         self.norm1 = MLXNN.GroupNorm(
-            groupCount: Self.numGroups,
+            groupCount: Self.groupCount(for: inChannels),
             dimensions: inChannels,
             pytorchCompatible: true
         )
@@ -36,7 +49,7 @@ final class ResnetBlock2D: MLXNN.Module {
             padding: .init(1)
         )
         self.norm2 = MLXNN.GroupNorm(
-            groupCount: Self.numGroups,
+            groupCount: Self.groupCount(for: outChannels),
             dimensions: outChannels,
             pytorchCompatible: true
         )

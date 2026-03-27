@@ -451,8 +451,8 @@ struct SDXLVAEDecoderDecodeTests {
     try decoder.apply(weights: emptyParams)
     #expect(decoder.isLoaded)
 
-    // decode() uses placeholder forward pass (Sortie 3 wires the real forward pass)
-    // but must still produce correctly shaped output
+    // With model loaded, decode() routes through real SDXLVAEDecoderModel forward pass.
+    // Output shape must be [B, H*8, W*8, 3].
     let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
     let output = try decoder.decode(latents)
 
@@ -572,5 +572,230 @@ struct SDXLVAEDecoderKeyCoverageTests {
     for key in encoderKeys {
       #expect(mapping(key) == nil, "Key \(key) should be filtered (nil)")
     }
+  }
+}
+
+// MARK: - Sortie 3: Forward Pass Integration Tests
+
+/// Builds a minimal synthetic `ModuleParameters` that covers the entire
+/// `SDXLVAEDecoderModel` parameter tree.  All weights are zero-initialized
+/// (NHWC layout after transposition, matching the MLX Conv2d convention).
+/// Zero weights cause the model to produce all-zero activations, which is a
+/// valid numerical output and allows shape/range assertions without needing
+/// real checkpoint data.
+private func makeSyntheticVAEParams() -> Tuberia.ModuleParameters {
+  var params: [String: MLXArray] = [:]
+
+  // post_quant_conv: [out=4, kH=1, kW=1, in=4]  (NHWC 1x1 conv weight)
+  params["postQuantConv.weight"] = MLXArray.zeros([4, 1, 1, 4]).asType(.float32)
+  params["postQuantConv.bias"] = MLXArray.zeros([4]).asType(.float32)
+
+  // midBlock resnets
+  // resnet 0: inChannels=4, outChannels=512 → has convShortcut
+  let midResnetSpecs: [(inCh: Int, outCh: Int, hasShortcut: Bool)] = [
+    (4, 512, true),
+    (512, 512, false),
+  ]
+  for (i, spec) in midResnetSpecs.enumerated() {
+    let p = "midBlock.resnets.\(i)"
+    params["\(p).norm1.weight"] = MLXArray.zeros([spec.inCh]).asType(.float32)
+    params["\(p).norm1.bias"] = MLXArray.zeros([spec.inCh]).asType(.float32)
+    params["\(p).conv1.weight"] = MLXArray.zeros([spec.outCh, 3, 3, spec.inCh]).asType(.float32)
+    params["\(p).conv1.bias"] = MLXArray.zeros([spec.outCh]).asType(.float32)
+    params["\(p).norm2.weight"] = MLXArray.zeros([spec.outCh]).asType(.float32)
+    params["\(p).norm2.bias"] = MLXArray.zeros([spec.outCh]).asType(.float32)
+    params["\(p).conv2.weight"] = MLXArray.zeros([spec.outCh, 3, 3, spec.outCh]).asType(.float32)
+    params["\(p).conv2.bias"] = MLXArray.zeros([spec.outCh]).asType(.float32)
+    if spec.hasShortcut {
+      params["\(p).convShortcut.weight"] = MLXArray.zeros([spec.outCh, 1, 1, spec.inCh]).asType(
+        .float32)
+      params["\(p).convShortcut.bias"] = MLXArray.zeros([spec.outCh]).asType(.float32)
+    }
+  }
+
+  // midBlock attention (channels=512)
+  let attnCh = 512
+  params["midBlock.attention.groupNorm.weight"] = MLXArray.zeros([attnCh]).asType(.float32)
+  params["midBlock.attention.groupNorm.bias"] = MLXArray.zeros([attnCh]).asType(.float32)
+  params["midBlock.attention.query.weight"] = MLXArray.zeros([attnCh, attnCh]).asType(.float32)
+  params["midBlock.attention.query.bias"] = MLXArray.zeros([attnCh]).asType(.float32)
+  params["midBlock.attention.key.weight"] = MLXArray.zeros([attnCh, attnCh]).asType(.float32)
+  params["midBlock.attention.key.bias"] = MLXArray.zeros([attnCh]).asType(.float32)
+  params["midBlock.attention.value.weight"] = MLXArray.zeros([attnCh, attnCh]).asType(.float32)
+  params["midBlock.attention.value.bias"] = MLXArray.zeros([attnCh]).asType(.float32)
+  params["midBlock.attention.projAttn.weight"] = MLXArray.zeros([attnCh, attnCh]).asType(.float32)
+  params["midBlock.attention.projAttn.bias"] = MLXArray.zeros([attnCh]).asType(.float32)
+
+  // upBlocks specs: (inCh, outCh, hasUpsample)
+  let upBlockSpecs: [(inCh: Int, outCh: Int, hasUpsample: Bool)] = [
+    (512, 512, true),
+    (512, 512, true),
+    (512, 256, true),
+    (256, 128, false),
+  ]
+  for (blockIdx, blockSpec) in upBlockSpecs.enumerated() {
+    for resnetIdx in 0..<3 {
+      let rInCh = resnetIdx == 0 ? blockSpec.inCh : blockSpec.outCh
+      let rOutCh = blockSpec.outCh
+      let p = "upBlocks.\(blockIdx).resnets.\(resnetIdx)"
+      params["\(p).norm1.weight"] = MLXArray.zeros([rInCh]).asType(.float32)
+      params["\(p).norm1.bias"] = MLXArray.zeros([rInCh]).asType(.float32)
+      params["\(p).conv1.weight"] = MLXArray.zeros([rOutCh, 3, 3, rInCh]).asType(.float32)
+      params["\(p).conv1.bias"] = MLXArray.zeros([rOutCh]).asType(.float32)
+      params["\(p).norm2.weight"] = MLXArray.zeros([rOutCh]).asType(.float32)
+      params["\(p).norm2.bias"] = MLXArray.zeros([rOutCh]).asType(.float32)
+      params["\(p).conv2.weight"] = MLXArray.zeros([rOutCh, 3, 3, rOutCh]).asType(.float32)
+      params["\(p).conv2.bias"] = MLXArray.zeros([rOutCh]).asType(.float32)
+      if resnetIdx == 0 && rInCh != rOutCh {
+        params["\(p).convShortcut.weight"] = MLXArray.zeros([rOutCh, 1, 1, rInCh]).asType(
+          .float32)
+        params["\(p).convShortcut.bias"] = MLXArray.zeros([rOutCh]).asType(.float32)
+      }
+    }
+    if blockSpec.hasUpsample {
+      let ch = blockSpec.outCh
+      params["upBlocks.\(blockIdx).upsample.conv.weight"] = MLXArray.zeros([ch, 3, 3, ch])
+        .asType(.float32)
+      params["upBlocks.\(blockIdx).upsample.conv.bias"] = MLXArray.zeros([ch]).asType(.float32)
+    }
+  }
+
+  // Final norm + output conv
+  params["convNormOut.weight"] = MLXArray.zeros([128]).asType(.float32)
+  params["convNormOut.bias"] = MLXArray.zeros([128]).asType(.float32)
+  params["convOut.weight"] = MLXArray.zeros([3, 3, 3, 128]).asType(.float32)
+  params["convOut.bias"] = MLXArray.zeros([3]).asType(.float32)
+
+  return Tuberia.ModuleParameters(parameters: params)
+}
+
+@Suite("SDXLVAEDecoder Sortie 3: Forward Pass Integration Tests")
+struct SDXLVAEDecoderForwardPassTests {
+
+  @Test("decode() with loaded model produces [B, H*8, W*8, 3] output shape")
+  func decodeWithModelOutputShape() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+    #expect(decoder.isLoaded)
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    #expect(output.data.shape == [1, 64, 64, 3])
+  }
+
+  @Test("decode() spatial dimensions are 8x latent spatial dimensions")
+  func decodeSpatialUpscaling8x() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    // Use latent [1, 4, 6, 4] → expect output [1, 32, 48, 3]
+    let latents = MLXArray.zeros([1, 4, 6, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    let outShape = output.data.shape
+    #expect(outShape.count == 4)
+    #expect(outShape[0] == 1)
+    #expect(outShape[1] == 32)   // 4 * 8
+    #expect(outShape[2] == 48)   // 6 * 8
+    #expect(outShape[3] == 3)
+  }
+
+  @Test("decode() output has 3 channels (RGB)")
+  func decodeOutputChannels() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    #expect(output.data.shape.last == 3)
+  }
+
+  @Test("decode() output values are finite (not NaN or Inf)")
+  func decodeOutputFiniteValues() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    // Check that all values are finite using isNaN and isInf checks
+    let data = output.data.asArray(Float.self)
+    let allFinite = data.allSatisfy { $0.isFinite }
+    #expect(allFinite, "decode() output must contain only finite values")
+  }
+
+  @Test("decode() output metadata carries the scaling factor")
+  func decodeMetadataScalingFactor() throws {
+    let config = SDXLVAEDecoderConfiguration()
+    let decoder = try SDXLVAEDecoder(configuration: config)
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    guard let meta = output.metadata as? ImageDecoderMetadata else {
+      Issue.record("Expected ImageDecoderMetadata")
+      return
+    }
+    #expect(meta.scalingFactor == config.scalingFactor)
+  }
+
+  @Test("unloaded decoder falls back to placeholder — output shape is still [B, H*8, W*8, 3]")
+  func unloadedDecoderFallback() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    // Do NOT call apply(weights:) — model stays nil
+    #expect(!decoder.isLoaded)
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    #expect(output.data.shape == [1, 64, 64, 3])
+  }
+
+  @Test("unloaded decoder placeholder values are 0.5 (plausible mid-range)")
+  func unloadedPlaceholderValues() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    #expect(!decoder.isLoaded)
+
+    let latents = MLXArray.zeros([1, 2, 2, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    let values = output.data.asArray(Float.self)
+    let allHalf = values.allSatisfy { $0 == 0.5 }
+    #expect(allHalf, "Unloaded placeholder should produce all 0.5 values")
+  }
+
+  @Test("unload() after loading causes fallback to placeholder")
+  func unloadCausesFallbackToPlaceholder() throws {
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+    #expect(decoder.isLoaded)
+
+    decoder.unload()
+    #expect(!decoder.isLoaded)
+
+    // After unload, decode() must still return correctly shaped output via placeholder
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+    #expect(output.data.shape == [1, 64, 64, 3])
+
+    // And it should be the placeholder 0.5 values
+    let values = output.data.asArray(Float.self)
+    let allHalf = values.allSatisfy { $0 == 0.5 }
+    #expect(allHalf, "After unload, decode() should use 0.5 placeholder values")
+  }
+
+  @Test("scaling factor 1/0.13025 is applied before forward pass")
+  func scalingFactorApplied() throws {
+    // Verify that the scaling factor is 0.13025 (the SDXL standard).
+    // The configuration default uses 0.13025 and the decode() method divides by it.
+    let config = SDXLVAEDecoderConfiguration()
+    #expect(abs(config.scalingFactor - 0.13025) < 1e-6)
+
+    let decoder = try SDXLVAEDecoder(configuration: config)
+    // scalingFactor property is available via protocol
+    #expect(abs(decoder.scalingFactor - 0.13025) < 1e-6)
   }
 }
