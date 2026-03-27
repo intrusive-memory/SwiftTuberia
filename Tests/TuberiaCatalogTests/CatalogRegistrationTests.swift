@@ -4,7 +4,7 @@ import Tuberia
 
 @testable import TuberiaCatalog
 
-@Suite("CatalogRegistration Tests")
+@Suite("CatalogRegistration Tests", .serialized)
 struct CatalogRegistrationTests {
 
   @Test("ensureRegistered() registers expected component IDs")
