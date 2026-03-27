@@ -71,7 +71,7 @@ struct FlowMatchEulerSchedulerTests {
   // MARK: - Step Function
 
   @Test("Euler step preserves tensor shape")
-  func eulerStepShape() {
+  func eulerStepShape() throws {
     let config = FlowMatchEulerSchedulerConfiguration()
     let scheduler = FlowMatchEulerScheduler(configuration: config)
 
@@ -80,7 +80,7 @@ struct FlowMatchEulerSchedulerTests {
     let velocity = MLXArray.ones([1, 8, 8, 4]) * 0.1
     let sample = MLXArray.ones([1, 8, 8, 4]) * 0.5
 
-    let result = scheduler.step(
+    let result = try scheduler.step(
       output: velocity,
       timestep: plan.timesteps[0],
       sample: sample
@@ -90,7 +90,7 @@ struct FlowMatchEulerSchedulerTests {
   }
 
   @Test("Euler step changes zero-initialized sample")
-  func eulerStepDirection() {
+  func eulerStepDirection() throws {
     let config = FlowMatchEulerSchedulerConfiguration()
     let scheduler = FlowMatchEulerScheduler(configuration: config)
 
@@ -99,7 +99,7 @@ struct FlowMatchEulerSchedulerTests {
     let velocity = MLXArray.ones([1, 4, 4, 4])
     let sample = MLXArray.zeros([1, 4, 4, 4])
 
-    let result = scheduler.step(
+    let result = try scheduler.step(
       output: velocity,
       timestep: plan.timesteps[0],
       sample: sample
@@ -112,7 +112,7 @@ struct FlowMatchEulerSchedulerTests {
   }
 
   @Test("Full trajectory produces finite results")
-  func fullTrajectory() {
+  func fullTrajectory() throws {
     let config = FlowMatchEulerSchedulerConfiguration()
     let scheduler = FlowMatchEulerScheduler(configuration: config)
 
@@ -122,7 +122,7 @@ struct FlowMatchEulerSchedulerTests {
 
     for timestep in plan.timesteps {
       let velocity = MLXArray.ones([1, 4, 4, 4]) * 0.1
-      sample = scheduler.step(output: velocity, timestep: timestep, sample: sample)
+      sample = try scheduler.step(output: velocity, timestep: timestep, sample: sample)
       eval(sample)
     }
 
@@ -153,18 +153,100 @@ struct FlowMatchEulerSchedulerTests {
   // MARK: - State Management
 
   @Test("reset() allows clean reconfiguration")
-  func resetClearsState() {
+  func resetClearsState() throws {
     let config = FlowMatchEulerSchedulerConfiguration()
     let scheduler = FlowMatchEulerScheduler(configuration: config)
 
     let plan = scheduler.configure(steps: 5)
     let velocity = MLXArray.ones([1, 4, 4, 4]) * 0.1
     let sample = MLXArray.ones([1, 4, 4, 4])
-    let _ = scheduler.step(output: velocity, timestep: plan.timesteps[0], sample: sample)
+    let _ = try scheduler.step(output: velocity, timestep: plan.timesteps[0], sample: sample)
 
     scheduler.reset()
 
     let plan2 = scheduler.configure(steps: 10)
     #expect(plan2.timesteps.count == 10)
+  }
+
+  // MARK: - Error Handling
+
+  @Test("step() without prior configure() throws descriptive error")
+  func stepWithoutConfigureThrows() {
+    let config = FlowMatchEulerSchedulerConfiguration()
+    let scheduler = FlowMatchEulerScheduler(configuration: config)
+
+    let velocity = MLXArray.ones([1, 4, 4, 4])
+    let sample = MLXArray.ones([1, 4, 4, 4])
+
+    #expect(throws: PipelineError.self) {
+      try scheduler.step(
+        output: velocity,
+        timestep: 100,
+        sample: sample
+      )
+    }
+  }
+
+  @Test("step() with out-of-plan timestep snaps to nearest valid timestep")
+  func stepWithOutOfPlanTimestepSnapsToNearest() throws {
+    let config = FlowMatchEulerSchedulerConfiguration()
+    let scheduler = FlowMatchEulerScheduler(configuration: config)
+
+    let plan = scheduler.configure(steps: 10)
+
+    let velocity = MLXArray.ones([1, 4, 4, 4]) * 0.1
+    let sample = MLXArray.ones([1, 4, 4, 4])
+
+    // Use a timestep that is NOT in the plan
+    let validTimestep = plan.timesteps[0]
+    let invalidTimestep = validTimestep + 50  // Likely not in the plan
+
+    // This should NOT throw; it should snap to the nearest timestep
+    let result = try scheduler.step(
+      output: velocity,
+      timestep: invalidTimestep,
+      sample: sample
+    )
+
+    #expect(result.shape == sample.shape, "Result should have the same shape as input sample")
+
+    eval(result)
+    let resultMean = result.mean().item(Float.self)
+    #expect(resultMean.isFinite, "Result should contain finite values")
+    #expect(resultMean != sample.mean().item(Float.self), "Result should be different from input sample (velocity applied)")
+  }
+
+  @Test("step() with out-of-plan timestep produces consistent results")
+  func stepWithOutOfPlanTimestepIsConsistent() throws {
+    let config = FlowMatchEulerSchedulerConfiguration()
+    let scheduler = FlowMatchEulerScheduler(configuration: config)
+
+    let plan = scheduler.configure(steps: 10)
+
+    let velocity = MLXArray.ones([1, 4, 4, 4]) * 0.1
+    let sample = MLXArray.ones([1, 4, 4, 4])
+
+    // Use two different out-of-plan timesteps that snap to the same nearest timestep
+    let invalidTimestep1 = plan.timesteps[0] + 5
+    let invalidTimestep2 = plan.timesteps[0] + 8
+
+    let result1 = try scheduler.step(
+      output: velocity,
+      timestep: invalidTimestep1,
+      sample: sample
+    )
+
+    let result2 = try scheduler.step(
+      output: velocity,
+      timestep: invalidTimestep2,
+      sample: sample
+    )
+
+    eval(result1)
+    eval(result2)
+
+    // Both should snap to the same nearest timestep, so results should be close
+    let diff = (result1 - result2).abs().max().item(Float.self)
+    #expect(diff < 1e-5, "Results for nearby out-of-plan timesteps should be nearly identical")
   }
 }

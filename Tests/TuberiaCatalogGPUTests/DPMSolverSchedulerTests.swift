@@ -83,7 +83,7 @@ struct DPMSolverSchedulerTests {
   // MARK: - Step Function
 
   @Test("step() preserves tensor shape")
-  func stepOutputShape() {
+  func stepOutputShape() throws {
     let config = DPMSolverSchedulerConfiguration()
     let scheduler = DPMSolverScheduler(configuration: config)
 
@@ -92,7 +92,7 @@ struct DPMSolverSchedulerTests {
     let output = MLXArray.ones([1, 8, 8, 4]) * 0.1
     let sample = MLXArray.ones([1, 8, 8, 4]) * 0.5
 
-    let result = scheduler.step(
+    let result = try scheduler.step(
       output: output,
       timestep: plan.timesteps[0],
       sample: sample
@@ -102,7 +102,7 @@ struct DPMSolverSchedulerTests {
   }
 
   @Test("Denoising trajectory changes sample over multiple steps")
-  func denoisingTrajectory() {
+  func denoisingTrajectory() throws {
     let config = DPMSolverSchedulerConfiguration(solverOrder: 1)
     let scheduler = DPMSolverScheduler(configuration: config)
 
@@ -113,7 +113,7 @@ struct DPMSolverSchedulerTests {
 
     for timestep in plan.timesteps {
       let noisePrediction = sample - zeroTarget
-      sample = scheduler.step(output: noisePrediction, timestep: timestep, sample: sample)
+      sample = try scheduler.step(output: noisePrediction, timestep: timestep, sample: sample)
       eval(sample)
     }
 
@@ -123,7 +123,7 @@ struct DPMSolverSchedulerTests {
   }
 
   @Test("Second-order solver produces finite results across steps")
-  func secondOrderMultistep() {
+  func secondOrderMultistep() throws {
     let config = DPMSolverSchedulerConfiguration(solverOrder: 2)
     let scheduler = DPMSolverScheduler(configuration: config)
 
@@ -132,18 +132,18 @@ struct DPMSolverSchedulerTests {
     var sample = MLXArray.ones([1, 4, 4, 4])
 
     let output1 = MLXArray.ones([1, 4, 4, 4]) * 0.1
-    sample = scheduler.step(output: output1, timestep: plan.timesteps[0], sample: sample)
+    sample = try scheduler.step(output: output1, timestep: plan.timesteps[0], sample: sample)
     eval(sample)
 
     let output2 = MLXArray.ones([1, 4, 4, 4]) * 0.1
-    sample = scheduler.step(output: output2, timestep: plan.timesteps[1], sample: sample)
+    sample = try scheduler.step(output: output2, timestep: plan.timesteps[1], sample: sample)
     eval(sample)
 
     #expect(sample.mean().item(Float.self).isFinite)
   }
 
   @Test("Velocity prediction type produces finite step output")
-  func velocityPrediction() {
+  func velocityPrediction() throws {
     let config = DPMSolverSchedulerConfiguration(predictionType: .velocity)
     let scheduler = DPMSolverScheduler(configuration: config)
 
@@ -151,7 +151,7 @@ struct DPMSolverSchedulerTests {
     let output = MLXArray.ones([1, 4, 4, 4]) * 0.1
     let sample = MLXArray.ones([1, 4, 4, 4]) * 0.5
 
-    let result = scheduler.step(output: output, timestep: plan.timesteps[0], sample: sample)
+    let result = try scheduler.step(output: output, timestep: plan.timesteps[0], sample: sample)
     eval(result)
 
     #expect(result.shape == [1, 4, 4, 4])
@@ -183,7 +183,7 @@ struct DPMSolverSchedulerTests {
   // MARK: - State Management
 
   @Test("reset() allows clean re-run")
-  func resetClearsState() {
+  func resetClearsState() throws {
     let config = DPMSolverSchedulerConfiguration(solverOrder: 2)
     let scheduler = DPMSolverScheduler(configuration: config)
 
@@ -191,7 +191,7 @@ struct DPMSolverSchedulerTests {
     var sample = MLXArray.ones([1, 4, 4, 4])
     for timestep in plan.timesteps.prefix(3) {
       let output = MLXArray.ones([1, 4, 4, 4]) * 0.1
-      sample = scheduler.step(output: output, timestep: timestep, sample: sample)
+      sample = try scheduler.step(output: output, timestep: timestep, sample: sample)
       eval(sample)
     }
 
@@ -200,7 +200,7 @@ struct DPMSolverSchedulerTests {
     let plan2 = scheduler.configure(steps: 5)
     let fresh = MLXArray.ones([1, 4, 4, 4])
     let output = MLXArray.ones([1, 4, 4, 4]) * 0.1
-    let result = scheduler.step(output: output, timestep: plan2.timesteps[0], sample: fresh)
+    let result = try scheduler.step(output: output, timestep: plan2.timesteps[0], sample: fresh)
     eval(result)
 
     #expect(result.shape == [1, 4, 4, 4])

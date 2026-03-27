@@ -58,16 +58,23 @@ public final class FlowMatchEulerScheduler: Scheduler, @unchecked Sendable {
     return plan
   }
 
-  public func step(output: MLXArray, timestep: Int, sample: MLXArray) -> MLXArray {
+  public func step(output: MLXArray, timestep: Int, sample: MLXArray) throws -> MLXArray {
     guard let plan = currentPlan else {
-      // Fallback: simple Euler step with a default dt
-      return sample + output * 0.01
+      throw PipelineError.generationFailed(
+        step: timestep,
+        reason: "Scheduler not configured. Call configure(steps:) before step()."
+      )
     }
 
     // Find the current index in the plan
     guard let currentIdx = plan.timesteps.firstIndex(of: timestep) else {
-      // Timestep not found in plan; return sample unchanged
-      return sample
+      // Snap to nearest timestep instead of silently dropping the step
+      let nearestIdx = findNearestTimestepIndex(for: timestep, in: plan.timesteps)
+      let sigmaI = plan.sigmas[nearestIdx]
+      let sigmaNext = plan.sigmas[nearestIdx + 1]
+      let dt = sigmaNext - sigmaI
+
+      return sample + Float(dt) * output
     }
 
     // Euler step: x_{t+dt} = x_t + dt * v(x_t, t)
@@ -77,6 +84,25 @@ public final class FlowMatchEulerScheduler: Scheduler, @unchecked Sendable {
     let dt = sigmaNext - sigmaI
 
     return sample + Float(dt) * output
+  }
+
+  /// Find the nearest timestep index in the schedule to the given timestep.
+  private func findNearestTimestepIndex(for timestep: Int, in timesteps: [Int]) -> Int {
+    guard !timesteps.isEmpty else { return 0 }
+
+    var minDistance = Int.max
+    var nearestIdx = 0
+
+    for (idx, t) in timesteps.enumerated() {
+      let distance = abs(t - timestep)
+      if distance < minDistance {
+        minDistance = distance
+        nearestIdx = idx
+      }
+    }
+
+    // Ensure we don't go out of bounds for sigma access
+    return min(nearestIdx, timesteps.count - 2)
   }
 
   public func addNoise(to sample: MLXArray, noise: MLXArray, at timestep: Int) -> MLXArray {

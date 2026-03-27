@@ -75,7 +75,7 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
     return plan
   }
 
-  public func step(output: MLXArray, timestep: Int, sample: MLXArray) -> MLXArray {
+  public func step(output: MLXArray, timestep: Int, sample: MLXArray) throws -> MLXArray {
     let idx = min(timestep, alphasCumprod.count - 1)
     let alphaProdT = alphasCumprod[max(0, idx)]
 

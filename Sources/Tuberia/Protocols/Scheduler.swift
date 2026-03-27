@@ -49,7 +49,8 @@ public protocol Scheduler: Sendable {
   ///   - timestep: Current timestep.
   ///   - sample: Current noisy latents.
   /// - Returns: Updated (less noisy) latents.
-  func step(output: MLXArray, timestep: Int, sample: MLXArray) -> MLXArray
+  /// - Throws: `PipelineError` if the step cannot be performed (e.g., scheduler not configured).
+  func step(output: MLXArray, timestep: Int, sample: MLXArray) throws -> MLXArray
 
   /// Add noise to clean latents at a given timestep. Used for img2img initialization.
   func addNoise(to sample: MLXArray, noise: MLXArray, at timestep: Int) -> MLXArray

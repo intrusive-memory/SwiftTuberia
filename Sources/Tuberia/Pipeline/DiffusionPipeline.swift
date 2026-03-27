@@ -402,7 +402,7 @@ public actor DiffusionPipeline<
           let guidedPrediction =
             uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction)
 
-          latents = scheduler.step(
+          latents = try scheduler.step(
             output: guidedPrediction,
             timestep: timestep,
             sample: latents
@@ -418,7 +418,7 @@ public actor DiffusionPipeline<
 
           let prediction = try backbone.forward(input)
 
-          latents = scheduler.step(
+          latents = try scheduler.step(
             output: prediction,
             timestep: timestep,
             sample: latents
