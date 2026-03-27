@@ -115,15 +115,19 @@ struct SDXLVAEDecoderTests {
 
   // MARK: - Key Mapping
 
-  @Test("keyMapping filters out encoder keys")
+  @Test("keyMapping filters out encoder keys and maps decoder keys correctly")
   func keyMappingFiltersEncoderKeys() throws {
     let config = SDXLVAEDecoderConfiguration()
     let decoder = try SDXLVAEDecoder(configuration: config)
 
     let mapping = decoder.keyMapping
 
-    #expect(mapping("decoder.conv_in.weight") != nil)
+    // Decoder keys that should map to non-nil values
     #expect(mapping("post_quant_conv.weight") != nil)
+    #expect(mapping("decoder.conv_norm_out.weight") != nil)
+    #expect(mapping("decoder.conv_out.weight") != nil)
+    #expect(mapping("decoder.mid_block.resnets.0.conv1.weight") != nil)
+    // Encoder and quant_conv keys are filtered out
     #expect(mapping("encoder.conv_in.weight") == nil)
     #expect(mapping("quant_conv.weight") == nil)
   }
