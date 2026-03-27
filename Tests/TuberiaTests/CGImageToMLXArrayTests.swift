@@ -15,6 +15,7 @@ import Testing
 struct CGImageToMLXArrayTests {
 
     /// Helper to create a synthetic CGImage with known pixel values.
+    /// Uses CGDataProvider directly (not CGContext) so it works in headless CI environments.
     private func createSyntheticCGImage(
         width: Int,
         height: Int,
@@ -22,7 +23,8 @@ struct CGImageToMLXArrayTests {
     ) -> CGImage? {
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
 
-        let bytesPerPixel = hasAlpha ? 4 : 3
+        // Always use 4 bytes per pixel (RGBA) — CGImage with 3 bpp is poorly supported
+        let bytesPerPixel = 4
         let bytesPerRow = width * bytesPerPixel
         var pixelData = [UInt8](repeating: 0, count: height * width * bytesPerPixel)
 
@@ -47,27 +49,31 @@ struct CGImageToMLXArrayTests {
                     pixelData[index] = 255; pixelData[index + 1] = 255; pixelData[index + 2] = 255
                 }
 
-                if hasAlpha {
-                    pixelData[index + 3] = 255
-                }
+                // Alpha channel: fully opaque if hasAlpha, otherwise stored but marked as skip
+                pixelData[index + 3] = 255
             }
         }
 
-        guard
-            let context = CGContext(
-                data: &pixelData,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: hasAlpha
-                    ? CGImageAlphaInfo.noneSkipLast.rawValue
-                    : CGImageAlphaInfo.none.rawValue
-            )
-        else { return nil }
+        let data = Data(pixelData)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
 
-        return context.makeImage()
+        let bitmapInfo: CGBitmapInfo = hasAlpha
+            ? CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)
+            : CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
+
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
     }
 
     // MARK: - Test Cases
