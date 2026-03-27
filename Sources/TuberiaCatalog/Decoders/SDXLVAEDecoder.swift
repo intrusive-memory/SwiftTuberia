@@ -18,6 +18,7 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
 
   private let configuration: Configuration
   private var model: SDXLVAEDecoderModel?
+  private var _currentWeights: Tuberia.ModuleParameters?
   public private(set) var isLoaded: Bool = false
 
   public required init(configuration: Configuration) throws {
@@ -73,6 +74,8 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
   }
 
   // MARK: - WeightedSegment
+
+  public var currentWeights: Tuberia.ModuleParameters? { _currentWeights }
 
   public var estimatedMemoryBytes: Int {
     // ~160 MB for fp16 SDXL VAE
@@ -183,11 +186,13 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     let mlxParams = MLXNN.ModuleParameters.unflattened(weights.parameters)
     loadedModel.update(parameters: mlxParams)
 
+    self._currentWeights = weights
     self.isLoaded = true
   }
 
   public func unload() {
     self.model = nil
+    self._currentWeights = nil
     self.isLoaded = false
   }
 

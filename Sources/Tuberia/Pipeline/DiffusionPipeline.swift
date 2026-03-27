@@ -249,18 +249,26 @@ public actor DiffusionPipeline<
     // Determine the actual seed
     let actualSeed = request.seed ?? UInt32.random(in: 0...UInt32.max)
 
-    // LoRA: load adapter weights before generation if requested.
-    // The adapter weights will be used later if needed.
-    // In a full implementation with real model weights, the LoRA would be
-    // merged into the backbone's weights via LoRALoader.apply/unapply.
-    // For the pipeline orchestration, we track the adapter weights for
-    // the generation lifecycle.
+    // LoRA: load adapter weights and merge into backbone before generation.
+    // Single active LoRA constraint: only one LoRA config per generation call.
+    // After the denoising loop, the base weights are restored via LoRALoader.unapply.
     let loraAdapterWeights: ModuleParameters?
     if let loraConfig = request.loRA {
       loraAdapterWeights = try await LoRALoader.loadAdapterWeights(
         config: loraConfig,
         keyMapping: backbone.keyMapping
       )
+      // Merge LoRA adapter weights into the backbone's base weights.
+      if let adapterWeights = loraAdapterWeights,
+        let baseWeights = backbone.currentWeights
+      {
+        let mergedWeights = LoRALoader.apply(
+          adapterWeights: adapterWeights,
+          to: baseWeights,
+          scale: loraConfig.scale
+        )
+        try backbone.apply(weights: mergedWeights)
+      }
     } else {
       loraAdapterWeights = nil
     }
@@ -460,10 +468,17 @@ public actor DiffusionPipeline<
       throw PipelineError.renderingFailed(reason: String(describing: error))
     }
 
-    // LoRA: unload after generation.
-    // With real weights loaded, LoRALoader.unapply would restore the base weights.
-    // This is a no-op when loraAdapterWeights is nil.
-    _ = loraAdapterWeights
+    // LoRA: restore base weights after generation by subtracting the adapter delta.
+    if let adapterWeights = loraAdapterWeights, let loraConfig = request.loRA,
+      let currentWeights = backbone.currentWeights
+    {
+      let restoredWeights = LoRALoader.unapply(
+        adapterWeights: adapterWeights,
+        from: currentWeights,
+        scale: loraConfig.scale
+      )
+      try backbone.apply(weights: restoredWeights)
+    }
 
     let duration = Date().timeIntervalSince(startTime)
     progress(.complete(duration: duration))

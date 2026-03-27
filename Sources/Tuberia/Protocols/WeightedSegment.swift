@@ -8,6 +8,9 @@ public protocol WeightedSegment: Sendable {
   var isLoaded: Bool { get }
   var keyMapping: KeyMapping { get }
   var tensorTransform: TensorTransform? { get }
+  /// The last `ModuleParameters` applied via `apply(weights:)`, or `nil` if unloaded.
+  /// Used by LoRA integration to merge/restore adapter weights into the base model.
+  var currentWeights: ModuleParameters? { get }
 }
 
 extension WeightedSegment {

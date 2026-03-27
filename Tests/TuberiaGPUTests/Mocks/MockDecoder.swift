@@ -60,6 +60,8 @@ public final class MockDecoder: Decoder, @unchecked Sendable {
     { key in key }
   }
 
+  public var currentWeights: ModuleParameters? { weights }
+
   public func apply(weights: ModuleParameters) throws {
     self.weights = weights
     self.isLoaded = true
@@ -139,6 +141,8 @@ public final class MockBidirectionalDecoder: BidirectionalDecoder, @unchecked Se
   public var keyMapping: KeyMapping {
     { key in key }
   }
+
+  public var currentWeights: ModuleParameters? { weights }
 
   public func apply(weights: ModuleParameters) throws {
     self.weights = weights

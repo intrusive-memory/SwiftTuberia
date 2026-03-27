@@ -47,4 +47,6 @@ public final class MockWeightedSegment: WeightedSegment, @unchecked Sendable {
 
   /// Access to stored weights for test assertions.
   public var storedWeights: ModuleParameters? { weights }
+
+  public var currentWeights: ModuleParameters? { weights }
 }

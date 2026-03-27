@@ -61,6 +61,8 @@ public final class MockTextEncoder: TextEncoder, @unchecked Sendable {
     self.isLoaded = true
   }
 
+  public var currentWeights: ModuleParameters? { weights }
+
   public func unload() {
     self.weights = nil
     self.isLoaded = false

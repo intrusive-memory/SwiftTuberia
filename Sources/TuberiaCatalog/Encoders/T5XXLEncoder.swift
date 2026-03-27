@@ -29,6 +29,7 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   private let configuration: Configuration
   private var transformer: T5TransformerEncoder?
   private var tokenizer: (any Tokenizer)?
+  private var _currentWeights: Tuberia.ModuleParameters?
   public private(set) var isLoaded: Bool = false
 
   // T5-XXL architecture constants
@@ -186,6 +187,8 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
 
   // MARK: - WeightedSegment
 
+  public var currentWeights: Tuberia.ModuleParameters? { _currentWeights }
+
   public var estimatedMemoryBytes: Int {
     // ~1.2 GB for int4 quantized T5-XXL
     1_288_490_188
@@ -318,11 +321,13 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     model.update(parameters: mlxParams)
 
     self.transformer = model
+    self._currentWeights = weights
     self.isLoaded = true
   }
 
   public func unload() {
     self.transformer = nil
+    self._currentWeights = nil
     self.isLoaded = false
   }
 

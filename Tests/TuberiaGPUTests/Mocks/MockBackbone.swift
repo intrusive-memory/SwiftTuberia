@@ -62,6 +62,8 @@ public final class MockBackbone: Backbone, @unchecked Sendable {
     self.isLoaded = true
   }
 
+  public var currentWeights: ModuleParameters? { weights }
+
   public func unload() {
     self.weights = nil
     self.isLoaded = false
