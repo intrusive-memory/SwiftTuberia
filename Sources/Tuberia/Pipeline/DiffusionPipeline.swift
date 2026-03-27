@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 @preconcurrency import MLX
 import MLXRandom
@@ -337,13 +338,12 @@ public actor DiffusionPipeline<
         )
       }
 
-      // Convert CGImage to MLXArray placeholder (the actual conversion
-      // is the responsibility of the pipeline consumer or a helper;
-      // for now we encode the reference latents)
-      // In a real implementation, referenceImages[0] would be converted to
-      // an MLXArray of shape [B, H, W, 3] in [0, 1] range.
-      // For protocol correctness, we proceed with the BidirectionalDecoder.
-      let referencePixels = MLXArray.zeros([1, request.height, request.width, 3])
+      // Convert CGImage to MLXArray with shape [1, H, W, 3] in [0, 1] range
+      let referencePixels = cgImageToMLXArray(
+        referenceImages[0],
+        height: request.height,
+        width: request.width
+      )
 
       do {
         let imageLatents = try bidirectionalDecoder.encode(referencePixels)
@@ -489,5 +489,72 @@ public actor DiffusionPipeline<
     case .scheduler, .renderer:
       return nil
     }
+  }
+
+  /// Convert a CGImage to an MLXArray with shape [1, height, width, 3] in [0, 1] range.
+  ///
+  /// This function:
+  /// 1. Creates a CGContext with RGB color space, 8-bit per channel
+  /// 2. Draws the CGImage scaled to (width, height)
+  /// 3. Extracts raw pixel bytes (handles both RGBA and RGB)
+  /// 4. Converts UInt8 → Float32 and normalizes to [0, 1]
+  /// 5. Drops alpha channel if present (RGB only)
+  /// 6. Reshapes to [1, height, width, 3]
+  ///
+  /// - Parameters:
+  ///   - image: The CGImage to convert
+  ///   - height: Target height for resizing
+  ///   - width: Target width for resizing
+  /// - Returns: MLXArray with shape [1, height, width, 3] and values in [0, 1]
+  private func cgImageToMLXArray(_ image: CGImage, height: Int, width: Int) -> MLXArray {
+    // Create a CGContext with RGB color space, 8-bit per channel (RGBA format)
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      // Fallback: return zeros if color space creation fails
+      return MLXArray.zeros([1, height, width, 3])
+    }
+
+    let bytesPerPixel = 4 // RGBA
+    let bytesPerRow = width * bytesPerPixel
+    var pixelData = [UInt8](repeating: 0, count: height * width * bytesPerPixel)
+
+    guard let context = CGContext(
+      data: &pixelData,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: bytesPerRow,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+      // Fallback: return zeros if context creation fails
+      return MLXArray.zeros([1, height, width, 3])
+    }
+
+    // Draw the CGImage scaled to the target dimensions
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    // Convert pixel data to Float32 array
+    var floatPixels = [Float32](repeating: 0, count: height * width * 3)
+
+    for y in 0 ..< height {
+      for x in 0 ..< width {
+        let pixelIndex = (y * width + x) * bytesPerPixel
+        // Extract RGBA values
+        let r = Float32(pixelData[pixelIndex]) / 255.0
+        let g = Float32(pixelData[pixelIndex + 1]) / 255.0
+        let b = Float32(pixelData[pixelIndex + 2]) / 255.0
+        // Store as RGB (drop alpha channel)
+        let rgbIndex = (y * width + x) * 3
+        floatPixels[rgbIndex] = r
+        floatPixels[rgbIndex + 1] = g
+        floatPixels[rgbIndex + 2] = b
+      }
+    }
+
+    // Create MLXArray and reshape to [1, height, width, 3]
+    let array = MLXArray(floatPixels)
+    let reshaped = array.reshaped([1, height, width, 3])
+
+    return reshaped
   }
 }
