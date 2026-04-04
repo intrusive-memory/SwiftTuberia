@@ -21,3 +21,9 @@ For detailed project documentation, see **[AGENTS.md](AGENTS.md)**.
 - Two products: `Tuberia` (protocols + infra) and `TuberiaCatalog` (concrete components)
 - See [AGENTS.md](AGENTS.md) for complete documentation
 - See [REQUIREMENTS.md](REQUIREMENTS.md) for full specification
+
+## Claude-Specific Build Preferences
+
+- NEVER use `swift build` or `swift test` — always use `xcodebuild`
+- Use XcodeBuildMCP tools (`swift_package_build`, `swift_package_test`) when available
+- See global `~/.claude/CLAUDE.md` for MCP server configuration and communication preferences
