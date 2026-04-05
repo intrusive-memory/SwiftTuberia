@@ -73,10 +73,10 @@ final class ResnetBlock2D: MLXNN.Module {
   func callAsFunction(_ x: MLXArray) -> MLXArray {
     var h = x
     h = norm1(h)
-    h = MLXNN.silu(h)
+    h = h * MLX.sigmoid(h)
     h = conv1(h)
     h = norm2(h)
-    h = MLXNN.silu(h)
+    h = h * MLX.sigmoid(h)
     h = conv2(h)
 
     let residual: MLXArray
@@ -364,7 +364,7 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
 
     // Final normalization and output projection
     h = convNormOut(h)
-    h = MLXNN.silu(h)
+    h = h * MLX.sigmoid(h)
     h = convOut(h)
 
     return h
