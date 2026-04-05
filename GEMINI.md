@@ -1,9 +1,27 @@
-# GEMINI.md
+# Gemini-Specific Agent Instructions
 
-See [AGENTS.md](AGENTS.md) for full project documentation.
+**Read [AGENTS.md](AGENTS.md) first** for universal project documentation.
 
-**SwiftTuberia** -- Componentized generation pipeline for MLX inference.
+This file contains instructions specific to Google Gemini agents.
 
-Two products: Tuberia (protocols + infrastructure) and TuberiaCatalog (shared components).
+## Build and Test
 
-Platforms: iOS 26.0+, macOS 26.0+ only.
+Use standard `xcodebuild` commands (no MCP access):
+
+```bash
+# Build
+xcodebuild build -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+
+# Test
+xcodebuild test -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+
+# Resolve dependencies
+xcodebuild -resolvePackageDependencies
+```
+
+## Gemini-Specific Critical Rules
+
+1. Use standard CLI tools — no MCP server access
+2. NEVER use `swift build` or `swift test` — use `xcodebuild`
+3. NEVER add code targeting platforms older than iOS 26.0 / macOS 26.0
+4. Apple Silicon only — always include `arch=arm64` in destinations
