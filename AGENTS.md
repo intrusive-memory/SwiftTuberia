@@ -2,11 +2,14 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.2.6
+**Version**: 0.2.7
 
 ---
 
 ## Recent Changes
+
+### v0.2.7
+- Patch release — documentation and organizational update (AGENTS.md/CLAUDE.md/GEMINI.md).
 
 ### v0.2.6
 - **Bug fix**: Replaced `MLXNN.silu()` compiled op with direct `h * MLX.sigmoid(h)` in `SDXLVAEModel` (`ResnetBlock2D` ×2, `SDXLVAEDecoderModel` ×1). Avoids compiled-op issues while producing identical results.
@@ -44,8 +47,8 @@ Two products:
 ## Build and Test
 
 ```bash
-xcodebuild build -scheme SwiftTuberia -destination 'platform=macOS'
-xcodebuild test -scheme SwiftTuberia -destination 'platform=macOS'
+xcodebuild build -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+xcodebuild test -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
 ```
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.

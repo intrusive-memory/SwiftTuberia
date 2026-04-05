@@ -159,7 +159,10 @@ public final class T5GatedFFN: MLXNN.Module {
 
   public func callAsFunction(_ x: MLXArray) -> MLXArray {
     // GeGLU gate: gelu(wi_0(x)) * wi_1(x)
-    let gate = MLXNN.gelu(MLX.matmul(x, wi_0))
+    // MLXNN.gelu uses compile(shapeless: true) which can return a 0D tensor under memory
+    // pressure, causing downstream crashes. Use direct gelu_new (tanh approximation) instead.
+    let inner = MLX.matmul(x, wi_0)
+    let gate = inner * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (inner + 0.044715 * inner * inner * inner)))
     let linear = MLX.matmul(x, wi_1)
     let gated = gate * linear
     // Project back to hidden dim
