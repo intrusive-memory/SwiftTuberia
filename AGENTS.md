@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.2.4
+**Version**: 0.2.5
 
 ---
 
