@@ -535,19 +535,21 @@ public actor DiffusionPipeline<
       return MLXArray.zeros([1, height, width, 3])
     }
 
-    let bytesPerPixel = 4 // RGBA
+    let bytesPerPixel = 4  // RGBA
     let bytesPerRow = width * bytesPerPixel
     var pixelData = [UInt8](repeating: 0, count: height * width * bytesPerPixel)
 
-    guard let context = CGContext(
-      data: &pixelData,
-      width: width,
-      height: height,
-      bitsPerComponent: 8,
-      bytesPerRow: bytesPerRow,
-      space: colorSpace,
-      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else {
+    guard
+      let context = CGContext(
+        data: &pixelData,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      )
+    else {
       // Fallback: return zeros if context creation fails
       return MLXArray.zeros([1, height, width, 3])
     }
@@ -558,8 +560,8 @@ public actor DiffusionPipeline<
     // Convert pixel data to Float32 array
     var floatPixels = [Float32](repeating: 0, count: height * width * 3)
 
-    for y in 0 ..< height {
-      for x in 0 ..< width {
+    for y in 0..<height {
+      for x in 0..<width {
         let pixelIndex = (y * width + x) * bytesPerPixel
         // Extract RGBA values
         let r = Float32(pixelData[pixelIndex]) / 255.0

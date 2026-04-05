@@ -11,9 +11,9 @@
 /// Implementations that do not require tokenizer loading (e.g. CLIP text
 /// encoder with a bundled vocab) need not conform to this protocol.
 public protocol TokenizerLoadable: AnyObject, Sendable {
-    /// Load the tokenizer from the component's model directory.
-    ///
-    /// Failure is non-fatal: encode() must fall back to placeholder
-    /// tokenization when the tokenizer is not loaded.
-    func loadTokenizer() async
+  /// Load the tokenizer from the component's model directory.
+  ///
+  /// Failure is non-fatal: encode() must fall back to placeholder
+  /// tokenization when the tokenizer is not loaded.
+  func loadTokenizer() async
 }

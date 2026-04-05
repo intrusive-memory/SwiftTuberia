@@ -63,7 +63,13 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     let outputW = latentW * 8
     let pixelData: MLXArray
     if let loadedModel = model {
-      pixelData = loadedModel(scaledLatents)
+      do {
+        pixelData = try withError { loadedModel(scaledLatents) }
+      } catch {
+        throw PipelineError.decodingFailed(
+          reason: "SDXL VAE forward pass failed: \(error.localizedDescription)"
+        )
+      }
     } else {
       pixelData = placeholderForwardPass(
         scaledLatents, outputShape: [batchSize, outputH, outputW, 3])
