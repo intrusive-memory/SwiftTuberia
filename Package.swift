@@ -20,7 +20,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.2"),
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", from: "0.5.5"),
+        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", from: "0.5.6"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6")
     ],
     targets: [
