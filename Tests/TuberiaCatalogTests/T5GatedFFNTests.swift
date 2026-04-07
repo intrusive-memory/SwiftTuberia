@@ -235,11 +235,12 @@ struct GeluNewAccuracyTests {
 
     /// Verify the constant in the formula.
     /// sqrt(2 / pi) = 0.7978845608...
-    @Test("gelu_new constant sqrt(2/pi) is correct to 8 significant figures")
+    /// Tolerance is 1e-7 because Float has ~7 significant decimal digits of precision.
+    @Test("gelu_new constant sqrt(2/pi) is correct to 7 significant figures")
     func geluNewConstantCorrect() {
         let expected = Float(2.0 / Double.pi).squareRoot()
         let usedInCode: Float = 0.7978845608
-        #expect(abs(usedInCode - expected) < 1e-8, "Constant mismatch: expected \(expected), got \(usedInCode)")
+        #expect(abs(usedInCode - expected) < 1e-7, "Constant mismatch: expected \(expected), got \(usedInCode)")
     }
 }
 
@@ -286,27 +287,29 @@ struct T5RMSNormTests {
         #expect(!data.contains { $0.isInfinite }, "T5RMSNorm must not produce Inf")
     }
 
-    @Test("normalizes different-magnitude inputs to similar RMS")
+    @Test("normalizes large-magnitude input to RMS ≈ 1.0; small input is finite")
     func normalizesRMS() {
-        // After RMSNorm with ones weight, RMS of output ≈ 1.0 regardless of input scale.
+        // RMSNorm normalises x by its own RMS. For inputs where rms(x) >> sqrt(eps),
+        // the output RMS ≈ 1.0 (with weight=1). For very small inputs where rms(x) is
+        // comparable to sqrt(eps), the denominator is dominated by eps and the output
+        // is not 1.0 — that is the correct numerical behaviour, not a bug.
         let dim = 16
         let norm = T5RMSNorm(dim: dim)
 
-        let small = MLXArray.ones([1, 1, dim]) * 0.001
+        // Large input: rms(x) = 1000 >> sqrt(eps≈1e-6) = 0.001 → output RMS ≈ 1.0
         let large = MLXArray.ones([1, 1, dim]) * 1000.0
-
-        let outSmall = norm(small)
         let outLarge = norm(large)
-        eval(outSmall, outLarge)
-
-        let smallData = outSmall.reshaped([-1]).asArray(Float.self)
+        eval(outLarge)
         let largeData = outLarge.reshaped([-1]).asArray(Float.self)
-
-        // Both should produce the same RMS (≈ 1.0 with weight=1, input=constant)
-        let rmsSmall = sqrt(smallData.map { $0 * $0 }.reduce(0, +) / Float(dim))
         let rmsLarge = sqrt(largeData.map { $0 * $0 }.reduce(0, +) / Float(dim))
-
-        #expect(abs(rmsSmall - 1.0) < 0.001, "RMS of small input after norm should be ≈1.0, got \(rmsSmall)")
         #expect(abs(rmsLarge - 1.0) < 0.001, "RMS of large input after norm should be ≈1.0, got \(rmsLarge)")
+
+        // Small input: rms(x) = 0.001 ≈ sqrt(eps) — output is finite but not necessarily 1.0
+        let small = MLXArray.ones([1, 1, dim]) * 0.001
+        let outSmall = norm(small)
+        eval(outSmall)
+        let smallData = outSmall.reshaped([-1]).asArray(Float.self)
+        #expect(!smallData.contains { $0.isNaN }, "Small input must not produce NaN")
+        #expect(!smallData.contains { $0.isInfinite }, "Small input must not produce Inf")
     }
 }
