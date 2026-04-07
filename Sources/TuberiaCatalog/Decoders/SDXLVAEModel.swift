@@ -71,6 +71,10 @@ final class ResnetBlock2D: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
+    // Force evaluation before GroupNorm. Under memory pressure, lazy tensors produced
+    // by large graph operations can have ndim=0 (shapeless). eval() ensures x is
+    // materialised and its shape is readable before norm1/norm2 operate on it.
+    eval(x)
     var h = x
     h = norm1(h)
     h = h * MLX.sigmoid(h)
@@ -120,11 +124,15 @@ final class AttentionBlock: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
-    let shape = x.shape  // [B, H, W, C]
-    let b = shape[0]
-    let h = shape[1]
-    let w = shape[2]
-    let c = shape[3]
+    // Force evaluation before accessing shape dimensions. Under memory pressure,
+    // lazy tensors produced by large graph operations can have ndim=0 (shapeless).
+    // eval() ensures x is materialised and its shape is readable.
+    eval(x)
+
+    let b = x.dim(0)
+    let h = x.dim(1)
+    let w = x.dim(2)
+    let c = x.dim(3)
     let seqLen = h * w
 
     // Normalize then flatten spatial dims for attention
@@ -132,23 +140,31 @@ final class AttentionBlock: MLXNN.Module {
     hidden = hidden.reshaped([b, seqLen, c])  // [B, H*W, C]
 
     let q = query(hidden)  // [B, H*W, C]
-    let k = key(hidden)  // [B, H*W, C]
+    let k = key(hidden)    // [B, H*W, C]
     let v = value(hidden)  // [B, H*W, C]
 
-    // Scaled dot-product attention: softmax(Q K^T / sqrt(C)) V
+    // Use MLXFast.scaledDotProductAttention (flash attention) instead of materialising
+    // an explicit [B, H*W, H*W] attention-weight matrix. For a 1024×1024 image the
+    // naïve matmul produces a [1, 16384, 16384] tensor (~536 MB fp16) which can cause
+    // out-of-memory failures that surface as shapeless-tensor crashes.
+    // Reshape to [B, numHeads=1, seqLen, headDim=C] as required by the API.
     let scale = 1.0 / sqrt(Float(c))
-    // q: [B, H*W, C], k: [B, H*W, C]
-    // attnWeights = q @ k^T: [B, H*W, H*W]
-    let kTransposed = k.transposed(0, 2, 1)  // [B, C, H*W]
-    var attnWeights = matmul(q, kTransposed) * scale  // [B, H*W, H*W]
-    attnWeights = MLX.softmax(attnWeights, axis: -1)
+    let qReshaped = q.expandedDimensions(axis: 1)  // [B, 1, H*W, C]
+    let kReshaped = k.expandedDimensions(axis: 1)  // [B, 1, H*W, C]
+    let vReshaped = v.expandedDimensions(axis: 1)  // [B, 1, H*W, C]
 
-    // attended: [B, H*W, C]
-    var out = matmul(attnWeights, v)
+    let attnOut = MLXFast.scaledDotProductAttention(
+      queries: qReshaped,
+      keys: kReshaped,
+      values: vReshaped,
+      scale: scale,
+      mask: nil
+    )  // [B, 1, H*W, C]
 
-    // Project and reshape back to spatial
-    out = projAttn(out)  // [B, H*W, C]
-    out = out.reshaped([b, h, w, c])  // [B, H, W, C]
+    // Remove numHeads dimension and project back to spatial layout
+    let squeezed = attnOut.reshaped([b, seqLen, c])  // [B, H*W, C]
+    var out = projAttn(squeezed)                       // [B, H*W, C]
+    out = out.reshaped([b, h, w, c])                   // [B, H, W, C]
 
     return x + out
   }
@@ -203,9 +219,16 @@ final class VAEMidBlock: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
+    print("[VAEMidBlock] entry x.shape=\(x.shape)")
     var h = resnets[0](x)
+    eval(h)
+    print("[VAEMidBlock] after resnet[0] h.shape=\(h.shape)")
     h = attention(h)
+    eval(h)
+    print("[VAEMidBlock] after attention h.shape=\(h.shape)")
     h = resnets[1](h)
+    eval(h)
+    print("[VAEMidBlock] after resnet[1] h.shape=\(h.shape)")
     return h
   }
 }
@@ -236,11 +259,17 @@ final class VAEUpBlock: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
+    print("[VAEUpBlock] entry x.shape=\(x.shape)")
     var h = x
-    for resnet in resnets {
+    for (i, resnet) in resnets.enumerated() {
       h = resnet(h)
+      eval(h)
+      print("[VAEUpBlock] after resnet[\(i)] h.shape=\(h.shape)")
     }
     if let up = upsample {
+      print("[VAEUpBlock] pre-upsample h.shape=\(h.shape) h.ndim=\(h.ndim)")
+      eval(h)
+      print("[VAEUpBlock] post-eval h.shape=\(h.shape) h.ndim=\(h.ndim)")
       h = up(h)
     }
     return h
@@ -351,15 +380,21 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
   /// - Parameter x: Latent tensor [B, H/8, W/8, 4] (already scaled by 1/scalingFactor)
   /// - Returns: Pixel tensor [B, H, W, 3]
   func callAsFunction(_ x: MLXArray) -> MLXArray {
+    print("[VAEModel] input x.shape=\(x.shape)")
     // Post-quantization projection (1x1 conv, 4→4)
     var h = postQuantConv(x)
+    eval(h)
+    print("[VAEModel] after postQuantConv h.shape=\(h.shape)")
 
-    // Mid block: bottleneck processing at low resolution
     h = midBlock(h)
+    eval(h)
+    print("[VAEModel] after midBlock h.shape=\(h.shape)")
 
     // Progressive upsampling through up blocks
-    for upBlock in upBlocks {
+    for (i, upBlock) in upBlocks.enumerated() {
       h = upBlock(h)
+      eval(h)
+      print("[VAEModel] after upBlock[\(i)] h.shape=\(h.shape)")
     }
 
     // Final normalization and output projection

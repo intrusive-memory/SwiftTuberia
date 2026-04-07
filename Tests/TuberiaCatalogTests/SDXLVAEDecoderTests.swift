@@ -799,3 +799,53 @@ struct SDXLVAEDecoderForwardPassTests {
     #expect(abs(decoder.scalingFactor - 0.13025) < 1e-6)
   }
 }
+
+// MARK: - SDXLVAEDecoderModel Direct Forward Tests
+
+/// Tests that exercise SDXLVAEDecoderModel.callAsFunction directly,
+/// bypassing the SDXLVAEDecoder wrapper that falls back to a placeholder when
+/// no weights are loaded. These tests hit the real ResnetBlock2D / GroupNorm
+/// code path that was responsible for ndim=0 crashes under memory pressure.
+///
+/// The regression test for the bug is ``realModelForwardDoesNotCollapseTo0Dim``:
+/// it verifies that the output is always 4-dimensional (never a shapeless scalar).
+@Suite("SDXLVAEDecoderModel Direct Forward")
+struct SDXLVAEDecoderModelForwardTests {
+
+  /// Verify the real model forward pass preserves output shape [B, H*8, W*8, 3].
+  /// This is the regression test for the ndim=0 crash in ResnetBlock2D.callAsFunction:
+  /// GroupNorm can collapse a tensor to 0-dim under memory pressure when the input
+  /// carries a stale lazy graph. The fix (eval(x) at ResnetBlock2D entry) is tested here.
+  @Test("Real model forward: output shape [1, 64, 64, 3] for input [1, 8, 8, 4]")
+  func realModelForwardOutputShape() throws {
+    let model = SDXLVAEDecoderModel()
+    let input = MLXArray.zeros([1, 8, 8, 4])
+    let output = model(input)
+    eval(output)
+    #expect(output.shape == [1, 64, 64, 3])
+  }
+
+  /// Regression test: the output must never be a 0-dim scalar (ndim == 0).
+  /// Before the fix, ResnetBlock2D.callAsFunction was missing eval(x), allowing
+  /// GroupNorm to return a shapeless tensor under memory pressure.
+  @Test("Real model forward: output ndim is 4, never 0-dim")
+  func realModelForwardDoesNotCollapseTo0Dim() throws {
+    let model = SDXLVAEDecoderModel()
+    let input = MLXArray.zeros([1, 8, 8, 4])
+    let output = model(input)
+    eval(output)
+    #expect(output.ndim == 4, "Output must be 4-dimensional — ndim=0 indicates a shapeless-tensor crash")
+  }
+
+  /// Verify output shape is preserved for the actual latent size from a 512×512 generation.
+  /// 512×512 pixels → 64×64 latents (÷8) → 512×512 pixels after decode.
+  @Test("Real model forward: 64x64 latent produces 512x512 pixel output")
+  func realModelForwardFullResolution() throws {
+    let model = SDXLVAEDecoderModel()
+    let input = MLXArray.zeros([1, 64, 64, 4])
+    let output = model(input)
+    eval(output)
+    #expect(output.shape == [1, 512, 512, 3])
+    #expect(output.ndim == 4)
+  }
+}

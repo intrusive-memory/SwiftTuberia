@@ -54,6 +54,13 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     // Apply internal scaling: latents * (1.0 / scalingFactor)
     let scaledLatents = latents * (1.0 / configuration.scalingFactor)
 
+    // Force evaluation before the VAE forward pass. The denoising loop calls eval(latents)
+    // after each step, but that evaluation may leave the scaledLatents lazy. Evaluating
+    // here ensures a clean, concrete input to the decoder — important because GroupNorm
+    // reshapes inside the VAE mid-block can produce shapeless (ndim=0) tensors under
+    // memory pressure if the input carries a stale lazy graph.
+    eval(scaledLatents)
+
     // Run the real forward pass when model weights are loaded;
     // fall back to a correctly-shaped placeholder when the model is nil.
     let batchSize = shape[0]
