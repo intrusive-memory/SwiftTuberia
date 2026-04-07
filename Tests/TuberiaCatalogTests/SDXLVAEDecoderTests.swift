@@ -59,6 +59,13 @@ struct SDXLVAEDecoderKeyMappingTests {
     #expect(mapping("decoder.conv_out.bias") == "convOut.bias")
   }
 
+  @Test("decoder.conv_in maps to convIn")
+  func convInKeyMapping() {
+    let mapping = decoder.keyMapping
+    #expect(mapping("decoder.conv_in.weight") == "convIn.weight")
+    #expect(mapping("decoder.conv_in.bias") == "convIn.bias")
+  }
+
   // MARK: mid_block resnets
 
   @Test("decoder.mid_block.resnets.0 norm and conv components map correctly")
@@ -479,7 +486,10 @@ struct SDXLVAEDecoderKeyCoverageTests {
     // post_quant_conv
     expectedKeys += ["post_quant_conv.weight", "post_quant_conv.bias"]
 
-    // mid_block resnets (0 has conv_shortcut: 4→512, 1 does not: 512→512)
+    // decoder.conv_in (4→512 channel expansion)
+    expectedKeys += ["decoder.conv_in.weight", "decoder.conv_in.bias"]
+
+    // mid_block resnets (both are 512→512 now that conv_in handles 4→512)
     for i in 0..<2 {
       let prefix = "decoder.mid_block.resnets.\(i)"
       expectedKeys += [
@@ -489,11 +499,7 @@ struct SDXLVAEDecoderKeyCoverageTests {
         "\(prefix).conv2.weight", "\(prefix).conv2.bias",
       ]
     }
-    // conv_shortcut on resnet 0 (channel expansion)
-    expectedKeys += [
-      "decoder.mid_block.resnets.0.conv_shortcut.weight",
-      "decoder.mid_block.resnets.0.conv_shortcut.bias",
-    ]
+    // mid_block resnet 0 no longer has conv_shortcut (conv_in handles 4→512, resnet 0 is 512→512)
 
     // mid_block attention
     let attnPrefix = "decoder.mid_block.attentions.0"
@@ -590,10 +596,15 @@ private func makeSyntheticVAEParams() -> Tuberia.ModuleParameters {
   params["postQuantConv.weight"] = MLXArray.zeros([4, 1, 1, 4]).asType(.float32)
   params["postQuantConv.bias"] = MLXArray.zeros([4]).asType(.float32)
 
+  // conv_in: [out=512, kH=3, kW=3, in=4]  (NHWC 3x3 conv weight, 4→512)
+  params["convIn.weight"] = MLXArray.zeros([512, 3, 3, 4]).asType(.float32)
+  params["convIn.bias"] = MLXArray.zeros([512]).asType(.float32)
+
   // midBlock resnets
-  // resnet 0: inChannels=4, outChannels=512 → has convShortcut
+  // resnet 0: inChannels=512, outChannels=512 (conv_in now handles 4→512)
+  // resnet 1: inChannels=512, outChannels=512
   let midResnetSpecs: [(inCh: Int, outCh: Int, hasShortcut: Bool)] = [
-    (4, 512, true),
+    (512, 512, false),
     (512, 512, false),
   ]
   for (i, spec) in midResnetSpecs.enumerated() {
