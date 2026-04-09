@@ -2,11 +2,19 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.2.7
+**Version**: 0.3.0
 
 ---
 
 ## Recent Changes
+
+### v0.3.0
+- **Test coverage remediation**: removed 6 redundant tests; added 3 new test files (`DPMSolverSchedulerTests`, `FlowMatchEulerSchedulerTests`, `ImageRendererUnitTests`) and 3 new suites (`SDXLVAEDecoderTensorTransformTests`, `LoRAKeyConventionTests`, `PipelineErrorTests`); strengthened `applyWeightsDoesNotCrash`; added edge-case tests to `DeviceCapabilityTests`.
+- **WeightLoader refactor**: `loadFromPath()` now `async throws`; routes all local file I/O through `AcervoManager.withLocalAccess` (SwiftAcervo 0.6.0). Tuberia no longer calls `FileManager` directly.
+- **DiffusionPipeline**: `generate()` now guards `encoder.isLoaded`, `backbone.isLoaded`, `decoder.isLoaded` at entry, throwing `PipelineError.missingComponent(role:)` if any segment is unloaded.
+- **MockPipelineRecipe**: added `loaded()` test factory; test weight loading moved to `DiffusionPipeline+TestSupport.swift` extension.
+- **LoRA interop docs**: AGENTS.md and README.md now document the `base_model.model.` prefix gap for PEFT/flux-2 adapters and downstream package interop status.
+- Bumped `SwiftAcervo` to `0.6.0`.
 
 ### v0.2.7
 - Patch release — documentation and organizational update (AGENTS.md/CLAUDE.md/GEMINI.md).
@@ -47,12 +55,53 @@ Two products:
 ## Build and Test
 
 ```bash
-xcodebuild build -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
-xcodebuild test -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+xcodebuild build -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
+xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
 ```
+
+Available schemes: `SwiftTuberia-Package`, `Tuberia`, `TuberiaCatalog`. Run `xcodebuild -list` to confirm. **Never use `-scheme SwiftTuberia`** — that scheme does not exist.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
 See [GENERATION_PATHS.md](GENERATION_PATHS.md) for generation path analysis.
+
+---
+
+## LoRA Adapter Interoperability
+
+SwiftTuberia's `LoRALoader` (`Sources/Tuberia/Pipeline/LoRALoader.swift`) is the shared LoRA merge engine used by all downstream model packages. Maintaining compatibility with adapters trained for `pixart-swift-mlx` and `flux-2-swift-mlx` is a **first-class priority**.
+
+### Supported Key Conventions
+
+| Convention | Example key | Status |
+|-----------|-------------|--------|
+| HuggingFace suffix | `layer.weight.lora_A` / `.lora_B` | ✅ Supported |
+| HuggingFace dot-weight | `layer.lora_A.weight` / `.lora_B.weight` | ✅ Supported |
+| Diffusers down/up | `layer.lora_down` / `.lora_up` (and `.weight` variants) | ✅ Supported |
+| PEFT `base_model.model.` prefix | `base_model.model.layer.lora_A.weight` | ❌ **Not supported** — see below |
+| `transformer.` prefix (Diffusers) | `transformer.layer.lora_A.weight` | ⚠️ Passes through unstripped; works only if backbone `keyMapping` already expects the prefix |
+| `unet.` prefix | `unet.layer.lora_A.weight` | ❌ **Not supported** |
+
+### Known Gap: `base_model.model.` Prefix (PEFT/flux-2 adapters)
+
+Adapters trained with PEFT (the dominant training framework for Flux-based models) emit keys prefixed with `base_model.model.`. Example:
+
+```
+base_model.model.double_blocks.0.img_attn.proj.lora_A.weight
+```
+
+`LoRALoader.parseLoRAKey` strips the LoRA suffix (`.lora_A.weight`) but does **not** strip `base_model.model.`. This means PEFT-trained adapters targeting Flux-2 will silently fail to merge — every key in the adapter will find no match in the base model parameters.
+
+`flux-2-swift-mlx` handles this locally in its own `LoRALoader.swift` (line 132: `layerPath.hasPrefix("base_model.model.")`). Until SwiftTuberia adds the same prefix stripping, `flux-2-swift-mlx` adapters loaded via the shared `LoRALoader` will not apply correctly.
+
+**Before adding any LoRA loading path that bypasses the local Flux-2 loader, add `base_model.model.` prefix stripping to `LoRALoader.parseLoRAKey`.**
+
+### Known Gap: `unet.` Prefix
+
+Older SD-style adapters sometimes prefix keys with `unet.`. This convention is documented but not implemented. If you add support, add a test in `LoRAKeyConventionTests` in `Tests/TuberiaGPUTests/LoRATests.swift`.
+
+### Interop Test Policy
+
+Any new key convention added to `LoRALoader` **must** have a corresponding test in `Tests/TuberiaGPUTests/LoRATests.swift` in the `LoRAKeyConventionTests` suite. The suite uses synthetic `ModuleParameters` — no real adapter files required.
 
 ## Common Agent Tasks
 

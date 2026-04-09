@@ -1,7 +1,7 @@
 import Foundation
-import Testing
 @preconcurrency import MLX
 import MLXNN
+import Testing
 import Tuberia
 
 @testable import TuberiaCatalog
@@ -59,18 +59,29 @@ struct SDXLVAEDecoderKeyMappingTests {
     #expect(mapping("decoder.conv_out.bias") == "convOut.bias")
   }
 
+  @Test("decoder.conv_in maps to convIn")
+  func convInKeyMapping() {
+    let mapping = decoder.keyMapping
+    #expect(mapping("decoder.conv_in.weight") == "convIn.weight")
+    #expect(mapping("decoder.conv_in.bias") == "convIn.bias")
+  }
+
   // MARK: mid_block resnets
 
   @Test("decoder.mid_block.resnets.0 norm and conv components map correctly")
   func midBlockResnet0() {
     let mapping = decoder.keyMapping
-    #expect(mapping("decoder.mid_block.resnets.0.norm1.weight") == "midBlock.resnets.0.norm1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.norm1.weight") == "midBlock.resnets.0.norm1.weight")
     #expect(mapping("decoder.mid_block.resnets.0.norm1.bias") == "midBlock.resnets.0.norm1.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.conv1.weight") == "midBlock.resnets.0.conv1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.conv1.weight") == "midBlock.resnets.0.conv1.weight")
     #expect(mapping("decoder.mid_block.resnets.0.conv1.bias") == "midBlock.resnets.0.conv1.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.norm2.weight") == "midBlock.resnets.0.norm2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.norm2.weight") == "midBlock.resnets.0.norm2.weight")
     #expect(mapping("decoder.mid_block.resnets.0.norm2.bias") == "midBlock.resnets.0.norm2.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.conv2.weight") == "midBlock.resnets.0.conv2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.conv2.weight") == "midBlock.resnets.0.conv2.weight")
     #expect(mapping("decoder.mid_block.resnets.0.conv2.bias") == "midBlock.resnets.0.conv2.bias")
   }
 
@@ -88,8 +99,10 @@ struct SDXLVAEDecoderKeyMappingTests {
   @Test("decoder.mid_block.resnets.1 maps correctly (no conv_shortcut)")
   func midBlockResnet1() {
     let mapping = decoder.keyMapping
-    #expect(mapping("decoder.mid_block.resnets.1.norm1.weight") == "midBlock.resnets.1.norm1.weight")
-    #expect(mapping("decoder.mid_block.resnets.1.conv2.weight") == "midBlock.resnets.1.conv2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.1.norm1.weight") == "midBlock.resnets.1.norm1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.1.conv2.weight") == "midBlock.resnets.1.conv2.weight")
   }
 
   // MARK: mid_block attention
@@ -221,6 +234,60 @@ struct SDXLVAEDecoderTensorTransformTests {
     try! SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
   }()
 
+  // MARK: - Sortie 3: Tensor Transform Tests
+
+  /// 4D tensor with a key containing "conv" is transposed from NCHW to NHWC.
+  @Test("4D conv-keyed weight is transposed from NCHW to NHWC")
+  func convWeightIsTransposed() {
+    let transform = decoder.tensorTransform!
+    // Use asymmetric shape [8, 2, 5, 7] so axis reordering is unambiguous.
+    // transposed(0,2,3,1): [8, 2, 5, 7] → [8, 5, 7, 2]
+    let input = MLXArray.zeros([8, 2, 5, 7]).asType(.float32)
+    let result = transform("conv1.weight", input)
+    eval(result)
+    #expect(result.shape == [8, 5, 7, 2])
+  }
+
+  /// 1D bias with a key containing "conv" passes through unchanged (ndim != 4).
+  @Test("1D conv bias passes through tensorTransform unchanged")
+  func biasPassesThroughUnchanged() {
+    let transform = decoder.tensorTransform!
+    let values: [Float] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    let bias = MLXArray(values)
+    let result = transform("convOut.bias", bias)
+    eval(result)
+    #expect(result.shape == [8])
+    #expect(result.asArray(Float.self) == values)
+  }
+
+  /// 4D tensor whose key does NOT contain "conv" passes through unchanged.
+  @Test("4D non-conv tensor passes through tensorTransform unchanged")
+  func nonConvWeightPassesThroughUnchanged() {
+    let transform = decoder.tensorTransform!
+    let values: [Float] = Array(0..<24).map(Float.init)
+    let input = MLXArray(values, [2, 3, 2, 2])
+    let result = transform("norm1.weight", input)
+    eval(result)
+    #expect(result.shape == [2, 3, 2, 2])
+    #expect(result.asArray(Float.self) == values)
+  }
+
+  /// Verifies the exact axes (0,2,3,1) used by the transposition on concrete values.
+  @Test("tensorTransform uses axes (0,2,3,1): [out,in,kH,kW] → [out,kH,kW,in]")
+  func transpositionIsCorrect() {
+    let transform = decoder.tensorTransform!
+    // [out=2, in=3, kH=1, kW=1]: kH=kW=1 makes axis reordering unambiguous.
+    let values: [Float] = [0, 1, 2, 3, 4, 5]
+    let input = MLXArray(values, [2, 3, 1, 1])
+    let result = transform("postQuantConv.weight", input)
+    eval(result)
+    // transposed(0,2,3,1): [2,3,1,1] → [2,1,1,3]
+    #expect(result.shape == [2, 1, 1, 3])
+    #expect(input.shape[1] == 3)  // in-channels at axis 1 in input
+    #expect(result.shape[3] == 3)  // in-channels moved to axis 3 after transposition
+    #expect(result.asArray(Float.self) == values)
+  }
+
   @Test("tensorTransform transposes 4D conv weights from NCHW to NHWC")
   func conv4DTranspose() {
     let transform = decoder.tensorTransform!
@@ -317,6 +384,7 @@ struct SDXLVAEDecoderTensorTransformTests {
     let transposed = transform("conv_out.weight", tensor4D)
     #expect(transposed.shape == [4, 3, 3, 3])  // same dims for [4,3,3,3] but axes reordered
   }
+
 }
 
 // MARK: - apply(weights:) Tests
@@ -479,7 +547,10 @@ struct SDXLVAEDecoderKeyCoverageTests {
     // post_quant_conv
     expectedKeys += ["post_quant_conv.weight", "post_quant_conv.bias"]
 
-    // mid_block resnets (0 has conv_shortcut: 4→512, 1 does not: 512→512)
+    // decoder.conv_in (4→512 channel expansion)
+    expectedKeys += ["decoder.conv_in.weight", "decoder.conv_in.bias"]
+
+    // mid_block resnets (both are 512→512 now that conv_in handles 4→512)
     for i in 0..<2 {
       let prefix = "decoder.mid_block.resnets.\(i)"
       expectedKeys += [
@@ -489,11 +560,7 @@ struct SDXLVAEDecoderKeyCoverageTests {
         "\(prefix).conv2.weight", "\(prefix).conv2.bias",
       ]
     }
-    // conv_shortcut on resnet 0 (channel expansion)
-    expectedKeys += [
-      "decoder.mid_block.resnets.0.conv_shortcut.weight",
-      "decoder.mid_block.resnets.0.conv_shortcut.bias",
-    ]
+    // mid_block resnet 0 no longer has conv_shortcut (conv_in handles 4→512, resnet 0 is 512→512)
 
     // mid_block attention
     let attnPrefix = "decoder.mid_block.attentions.0"
@@ -590,10 +657,15 @@ private func makeSyntheticVAEParams() -> Tuberia.ModuleParameters {
   params["postQuantConv.weight"] = MLXArray.zeros([4, 1, 1, 4]).asType(.float32)
   params["postQuantConv.bias"] = MLXArray.zeros([4]).asType(.float32)
 
+  // conv_in: [out=512, kH=3, kW=3, in=4]  (NHWC 3x3 conv weight, 4→512)
+  params["convIn.weight"] = MLXArray.zeros([512, 3, 3, 4]).asType(.float32)
+  params["convIn.bias"] = MLXArray.zeros([512]).asType(.float32)
+
   // midBlock resnets
-  // resnet 0: inChannels=4, outChannels=512 → has convShortcut
+  // resnet 0: inChannels=512, outChannels=512 (conv_in now handles 4→512)
+  // resnet 1: inChannels=512, outChannels=512
   let midResnetSpecs: [(inCh: Int, outCh: Int, hasShortcut: Bool)] = [
-    (4, 512, true),
+    (512, 512, false),
     (512, 512, false),
   ]
   for (i, spec) in midResnetSpecs.enumerated() {
@@ -696,8 +768,8 @@ struct SDXLVAEDecoderForwardPassTests {
     let outShape = output.data.shape
     #expect(outShape.count == 4)
     #expect(outShape[0] == 1)
-    #expect(outShape[1] == 32)   // 4 * 8
-    #expect(outShape[2] == 48)   // 6 * 8
+    #expect(outShape[1] == 32)  // 4 * 8
+    #expect(outShape[2] == 48)  // 6 * 8
     #expect(outShape[3] == 3)
   }
 
@@ -834,7 +906,8 @@ struct SDXLVAEDecoderModelForwardTests {
     let input = MLXArray.zeros([1, 8, 8, 4])
     let output = model(input)
     eval(output)
-    #expect(output.ndim == 4, "Output must be 4-dimensional — ndim=0 indicates a shapeless-tensor crash")
+    #expect(
+      output.ndim == 4, "Output must be 4-dimensional — ndim=0 indicates a shapeless-tensor crash")
   }
 
   /// Verify output shape is preserved for the actual latent size from a 512×512 generation.

@@ -99,6 +99,7 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
   ///
   /// Safetensors format (diffusers):
   /// - `post_quant_conv.{weight,bias}` → pass through to `postQuantConv.{weight,bias}`
+  /// - `decoder.conv_in.{weight,bias}` → `convIn.{weight,bias}`
   /// - `decoder.mid_block.resnets.{i}.{component}` → `midBlock.resnets.{i}.{component}`
   /// - `decoder.mid_block.attentions.0.{component}` → `midBlock.attention.{component}`
   /// - `decoder.up_blocks.{i}.resnets.{j}.{component}` → `upBlocks.{i}.resnets.{j}.{component}`
@@ -128,6 +129,12 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
       }
 
       let decoderKey = String(key.dropFirst("decoder.".count))
+
+      // decoder.conv_in.{weight,bias} → convIn.{weight,bias}
+      if decoderKey.hasPrefix("conv_in.") {
+        let suffix = String(decoderKey.dropFirst("conv_in.".count))
+        return "convIn.\(suffix)"
+      }
 
       // decoder.conv_norm_out.{weight,bias} → convNormOut.{weight,bias}
       if decoderKey.hasPrefix("conv_norm_out.") {

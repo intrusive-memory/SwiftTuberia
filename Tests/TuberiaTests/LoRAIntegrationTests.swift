@@ -1,7 +1,7 @@
 import Foundation
+@preconcurrency import MLX
 import Testing
 
-@preconcurrency import MLX
 @testable import Tuberia
 
 // MARK: - LoRA Integration Tests
@@ -135,63 +135,6 @@ struct LoRAIntegrationTests {
     #expect(abs(restoredValues1[3] - 8.0) < 1e-6)
   }
 
-  // MARK: - Test (c): LoRA with scale=0.0 produces no weight change
-
-  @Test("LoRA with scale=0.0 produces no weight change")
-  func testLoRAScaleZeroNoChange() {
-    let baseWeights = makeBaseWeights()
-    let adapterWeights = makeAdapterWeights()
-
-    let mergedWeights = LoRALoader.apply(
-      adapterWeights: adapterWeights,
-      to: baseWeights,
-      scale: 0.0
-    )
-
-    // With scale=0.0, the delta should be zero — weights unchanged
-    let merged0 = mergedWeights.parameters["layer.0.weight"]!
-    eval(merged0)
-    let mergedValues = merged0.asArray(Float32.self)
-    #expect(mergedValues.count == 4)
-    #expect(abs(mergedValues[0] - 1.0) < 1e-6)
-    #expect(abs(mergedValues[1] - 2.0) < 1e-6)
-    #expect(abs(mergedValues[2] - 3.0) < 1e-6)
-    #expect(abs(mergedValues[3] - 4.0) < 1e-6)
-
-    // layer.1 should also be unchanged
-    let merged1 = mergedWeights.parameters["layer.1.weight"]!
-    eval(merged1)
-    let mergedValues1 = merged1.asArray(Float32.self)
-    #expect(abs(mergedValues1[0] - 5.0) < 1e-6)
-    #expect(abs(mergedValues1[1] - 6.0) < 1e-6)
-    #expect(abs(mergedValues1[2] - 7.0) < 1e-6)
-    #expect(abs(mergedValues1[3] - 8.0) < 1e-6)
-  }
-
-  // MARK: - Test: Fractional scale modulates effect
-
-  @Test("LoRA with scale=0.5 applies half the adapter effect")
-  func testLoRAFractionalScale() {
-    let baseWeights = makeBaseWeights()
-    let adapterWeights = makeAdapterWeights()
-
-    let mergedWeights = LoRALoader.apply(
-      adapterWeights: adapterWeights,
-      to: baseWeights,
-      scale: 0.5
-    )
-
-    // B @ A = [[1,2],[1,2]], scaled by 0.5 = [[0.5,1.0],[0.5,1.0]]
-    // merged = [[1,2],[3,4]] + [[0.5,1.0],[0.5,1.0]] = [[1.5,3.0],[3.5,5.0]]
-    let merged0 = mergedWeights.parameters["layer.0.weight"]!
-    eval(merged0)
-    let mergedValues = merged0.asArray(Float32.self)
-    #expect(abs(mergedValues[0] - 1.5) < 1e-6)
-    #expect(abs(mergedValues[1] - 3.0) < 1e-6)
-    #expect(abs(mergedValues[2] - 3.5) < 1e-6)
-    #expect(abs(mergedValues[3] - 5.0) < 1e-6)
-  }
-
   // MARK: - Test: Round-trip with fractional scale
 
   @Test("LoRA apply then unapply with fractional scale restores original weights")
@@ -232,7 +175,7 @@ struct LoRAIntegrationTests {
 
     // After apply: currentWeights should be the applied weights
     let weights = ModuleParameters(parameters: [
-      "key1": MLXArray([Float32(1.0), 2.0]),
+      "key1": MLXArray([Float32(1.0), 2.0])
     ])
     try segment.apply(weights: weights)
     #expect(segment.currentWeights != nil)

@@ -140,7 +140,7 @@ final class AttentionBlock: MLXNN.Module {
     hidden = hidden.reshaped([b, seqLen, c])  // [B, H*W, C]
 
     let q = query(hidden)  // [B, H*W, C]
-    let k = key(hidden)    // [B, H*W, C]
+    let k = key(hidden)  // [B, H*W, C]
     let v = value(hidden)  // [B, H*W, C]
 
     // Use MLXFast.scaledDotProductAttention (flash attention) instead of materialising
@@ -163,8 +163,8 @@ final class AttentionBlock: MLXNN.Module {
 
     // Remove numHeads dimension and project back to spatial layout
     let squeezed = attnOut.reshaped([b, seqLen, c])  // [B, H*W, C]
-    var out = projAttn(squeezed)                       // [B, H*W, C]
-    out = out.reshaped([b, h, w, c])                   // [B, H, W, C]
+    var out = projAttn(squeezed)  // [B, H*W, C]
+    out = out.reshaped([b, h, w, c])  // [B, H, W, C]
 
     return x + out
   }
@@ -285,7 +285,8 @@ final class VAEUpBlock: MLXNN.Module {
 /// Architecture:
 /// ```
 /// post_quant_conv (4→4, 1x1)
-/// → mid_block (ResNet(4→512) + Attention(512) + ResNet(512→512))
+/// → conv_in (4→512, 3x3, padding=1)
+/// → mid_block (ResNet(512→512) + Attention(512) + ResNet(512→512))
 /// → up_block_0 (512→512, 3 ResNets, upsample 2x)
 /// → up_block_1 (512→512, 3 ResNets, upsample 2x)
 /// → up_block_2 (512→256, 3 ResNets, upsample 2x)
@@ -300,7 +301,10 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
   // Post-quantization conv (projects latent channels, 1x1)
   let postQuantConv: MLXNN.Conv2d
 
-  // Mid block: ResNet(4→512) + Attention(512) + ResNet(512→512)
+  // Channel expansion conv: 4→512, 3×3 with padding
+  let convIn: MLXNN.Conv2d
+
+  // Mid block: ResNet(512→512) + Attention(512) + ResNet(512→512)
   let midBlock: VAEMidBlock
 
   // Up blocks: progressive upsampling + channel reduction
@@ -325,8 +329,15 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
       kernelSize: .init(1)
     )
 
+    self.convIn = MLXNN.Conv2d(
+      inputChannels: Self.latentChannels,
+      outputChannels: Self.midChannels,
+      kernelSize: .init(3),
+      padding: .init(1)
+    )
+
     self.midBlock = VAEMidBlock(
-      inChannels: Self.latentChannels,
+      inChannels: Self.midChannels,
       outChannels: Self.midChannels
     )
 
@@ -385,6 +396,10 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
     var h = postQuantConv(x)
     eval(h)
     print("[VAEModel] after postQuantConv h.shape=\(h.shape)")
+
+    h = convIn(h)
+    eval(h)
+    print("[VAEModel] after convIn h.shape=\(h.shape)")
 
     h = midBlock(h)
     eval(h)

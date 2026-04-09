@@ -63,6 +63,39 @@ where
   public func validate() throws {
     try _customValidation?()
   }
+
+  // MARK: - Test Factory
+
+  /// Creates a `DiffusionPipeline` from this recipe with synthetic weights pre-loaded,
+  /// satisfying the `isLoaded` guards in `generate()` without downloading real weights.
+  public static func loaded(
+    encoderConfig: E.Configuration,
+    schedulerConfig: S.Configuration,
+    backboneConfig: B.Configuration,
+    decoderConfig: D.Configuration,
+    rendererConfig: R.Configuration,
+    supportsImageToImage: Bool = false,
+    unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy = .emptyPrompt,
+    allComponentIds: [String] = [],
+    quantizationConfig: QuantizationConfig = .asStored,
+    customValidation: (@Sendable () throws -> Void)? = nil
+  ) async throws -> DiffusionPipeline<E, S, B, D, R> {
+    let recipe = MockPipelineRecipe(
+      encoderConfig: encoderConfig,
+      schedulerConfig: schedulerConfig,
+      backboneConfig: backboneConfig,
+      decoderConfig: decoderConfig,
+      rendererConfig: rendererConfig,
+      supportsImageToImage: supportsImageToImage,
+      unconditionalEmbeddingStrategy: unconditionalEmbeddingStrategy,
+      allComponentIds: allComponentIds,
+      quantizationConfig: quantizationConfig,
+      customValidation: customValidation
+    )
+    let pipeline = try DiffusionPipeline(recipe: recipe)
+    try await pipeline.applyEmptyWeights()
+    return pipeline
+  }
 }
 
 /// Convenience typealias for the most common mock recipe.

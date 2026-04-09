@@ -213,7 +213,9 @@ struct FlowMatchEulerSchedulerTests {
     eval(result)
     let resultMean = result.mean().item(Float.self)
     #expect(resultMean.isFinite, "Result should contain finite values")
-    #expect(resultMean != sample.mean().item(Float.self), "Result should be different from input sample (velocity applied)")
+    #expect(
+      resultMean != sample.mean().item(Float.self),
+      "Result should be different from input sample (velocity applied)")
   }
 
   @Test("step() with out-of-plan timestep produces consistent results")
