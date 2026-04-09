@@ -73,4 +73,20 @@ struct DeviceCapabilityTests {
     #expect(first.chipGeneration == second.chipGeneration)
     #expect(first.platform == second.platform)
   }
+
+  @Test("Unknown chip string returns .unknown generation")
+  func unknownChipStringReturnsUnknownGeneration() throws {
+    #expect(DeviceCapability.parseChipGeneration(from: "apple m99") == .unknown)
+  }
+
+  @Test("Unknown generation has no neural accelerator")
+  func unknownGenerationHasNoNeuralAccelerator() throws {
+    let capability = DeviceCapability(
+      chipGeneration: .unknown,
+      totalMemoryGB: 16,
+      platform: .macOS,
+      hasNeuralAccelerators: false
+    )
+    #expect(capability.hasNeuralAccelerators == false)
+  }
 }

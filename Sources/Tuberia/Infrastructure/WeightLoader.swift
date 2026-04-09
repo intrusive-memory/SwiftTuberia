@@ -121,58 +121,43 @@ public struct WeightLoader: Sendable {
 
   /// Load weights from a local file path (used for LoRA adapters not registered in Acervo).
   ///
+  /// File access is scoped through `AcervoManager.shared.withLocalAccess` — no direct
+  /// `FileManager` or path construction occurs in Tuberia.
+  ///
   /// - Parameters:
   ///   - path: Local filesystem path to a safetensors file or directory containing safetensors files.
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform.
   ///   - quantization: Quantization strategy.
   /// - Returns: Remapped parameter tensors.
-  /// - Throws: `PipelineError.weightLoadingFailed` on parse or I/O errors.
+  /// - Throws: `PipelineError.weightLoadingFailed` on I/O or parse errors.
   public static func loadFromPath(
     _ path: String,
     keyMapping: KeyMapping,
     tensorTransform: TensorTransform? = nil,
     quantization: QuantizationConfig = .asStored
-  ) throws -> ModuleParameters {
+  ) async throws -> ModuleParameters {
     let url = URL(fileURLWithPath: path)
-    var urls: [URL]
-
-    var isDir: ObjCBool = false
-    if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
-      urls = findSafetensorsFiles(in: url)
-    } else {
-      urls = [url]
-    }
-
-    guard !urls.isEmpty else {
-      throw PipelineError.weightLoadingFailed(
-        component: path,
-        reason: "No .safetensors files found at path"
-      )
-    }
-
     do {
-      var allParameters: [String: MLXArray] = [:]
-
-      for fileURL in urls {
-        let rawArrays = try loadArrays(url: fileURL)
-
-        for (originalKey, tensor) in rawArrays {
-          guard let remappedKey = keyMapping(originalKey) else {
-            continue
-          }
-
-          var transformed = tensor
-          if let transform = tensorTransform {
-            transformed = transform(remappedKey, transformed)
-          }
-
-          transformed = applyQuantization(transformed, config: quantization)
-          allParameters[remappedKey] = transformed
+      return try await AcervoManager.shared.withLocalAccess(url) { handle in
+        let fileURLs = try handle.urls(matching: ".safetensors")
+        guard !fileURLs.isEmpty else {
+          throw PipelineError.weightLoadingFailed(
+            component: path,
+            reason: "No .safetensors files found at path"
+          )
         }
+        var allParameters: [String: MLXArray] = [:]
+        for fileURL in fileURLs {
+          for (originalKey, tensor) in try loadArrays(url: fileURL) {
+            guard let remappedKey = keyMapping(originalKey) else { continue }
+            var transformed = tensor
+            if let transform = tensorTransform { transformed = transform(remappedKey, transformed) }
+            allParameters[remappedKey] = applyQuantization(transformed, config: quantization)
+          }
+        }
+        return ModuleParameters(parameters: allParameters)
       }
-
-      return ModuleParameters(parameters: allParameters)
     } catch let error as PipelineError {
       throw error
     } catch {

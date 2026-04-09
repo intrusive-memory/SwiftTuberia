@@ -45,9 +45,32 @@ Then add the products you need:
 - **Tuberia** — Protocols + infrastructure (use when building custom components)
 - **TuberiaCatalog** — Concrete shared components (includes Tuberia via `@_exported import`)
 
+## LoRA Adapter Compatibility
+
+`LoRALoader` is the shared LoRA merge engine (`W' = W + scale × (B @ A)`) used by all downstream model packages. It normalizes key names across training framework conventions before merging.
+
+### Supported conventions
+
+| Training framework | Key format | Status |
+|-------------------|-----------|--------|
+| HuggingFace / Ostris | `layer.weight.lora_A` / `.lora_B` | ✅ |
+| HuggingFace dot-weight | `layer.lora_A.weight` / `.lora_B.weight` | ✅ |
+| Diffusers | `layer.lora_down` / `.lora_up` (with or without `.weight`) | ✅ |
+| PEFT (Flux.2, SD3) | `base_model.model.layer.lora_A.weight` | ❌ `base_model.model.` prefix not stripped |
+| Older SD/UNet adapters | `unet.layer.lora_A.weight` | ❌ `unet.` prefix not stripped |
+
+### Downstream package interop
+
+| Package | Adapter source | Status |
+|---------|---------------|--------|
+| [`pixart-swift-mlx`](../pixart-swift-mlx) | HuggingFace-style keys (`layer.lora_A.weight`) | ✅ Fully compatible |
+| [`flux-2-swift-mlx`](../flux-2-swift-mlx) | PEFT-trained adapters (`base_model.model.` prefix) | ❌ Prefix not stripped — handled locally in `flux-2-swift-mlx` pending fix here |
+
+**Priority**: `base_model.model.` prefix stripping must be added to `LoRALoader.parseLoRAKey` before any load path in either downstream package can route through the shared loader for PEFT adapters. See `AGENTS.md` § LoRA Adapter Interoperability for full policy and test requirements.
+
 ## Documentation
 
-- [AGENTS.md](AGENTS.md) — Architecture and API documentation
+- [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
 - [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
 - [GENERATION_PATHS.md](GENERATION_PATHS.md) — Generation path analysis
 

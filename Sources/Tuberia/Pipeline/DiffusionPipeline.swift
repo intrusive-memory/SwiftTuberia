@@ -23,11 +23,11 @@ public actor DiffusionPipeline<
 
   // MARK: - Components
 
-  private let encoder: E
-  private let scheduler: S
-  private let backbone: B
-  private let decoder: D
-  private let renderer: R
+  let encoder: E
+  let scheduler: S
+  let backbone: B
+  let decoder: D
+  let renderer: R
 
   // MARK: - Recipe Metadata
 
@@ -244,6 +244,16 @@ public actor DiffusionPipeline<
     request: Request,
     progress: @Sendable (PipelineProgress) -> Void
   ) async throws -> Result {
+    guard encoder.isLoaded else {
+      throw PipelineError.missingComponent(role: "encoder")
+    }
+    guard backbone.isLoaded else {
+      throw PipelineError.missingComponent(role: "backbone")
+    }
+    guard decoder.isLoaded else {
+      throw PipelineError.missingComponent(role: "decoder")
+    }
+
     let startTime = Date()
 
     // Determine the actual seed

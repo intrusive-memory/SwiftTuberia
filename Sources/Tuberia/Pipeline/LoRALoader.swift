@@ -35,7 +35,7 @@ public struct LoRALoader: Sendable {
         keyMapping: keyMapping
       )
     } else if let localPath = config.localPath {
-      return try WeightLoader.loadFromPath(
+      return try await WeightLoader.loadFromPath(
         localPath,
         keyMapping: keyMapping
       )

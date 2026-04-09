@@ -143,7 +143,7 @@ struct PipelineAssemblyTests {
 
   @Test("Pipeline generates with mock components (no real weights)")
   func pipelineGenerateSmokeTest() async throws {
-    let recipe = StandardMockRecipe(
+    let pipeline = try await StandardMockRecipe.loaded(
       encoderConfig: .init(embeddingDim: 4096, maxSeqLength: 120),
       schedulerConfig: .init(defaultTimesteps: [999, 500, 0]),
       backboneConfig: .init(conditioningDim: 4096, latentChannels: 4, maxSequenceLength: 120),
@@ -151,8 +151,6 @@ struct PipelineAssemblyTests {
       rendererConfig: (),
       unconditionalEmbeddingStrategy: .none
     )
-
-    let pipeline = try DiffusionPipeline(recipe: recipe)
 
     let request = DiffusionGenerationRequest(
       prompt: "test prompt",
@@ -188,7 +186,7 @@ struct PipelineAssemblyTests {
 
   @Test("Pipeline generates with CFG (empty prompt strategy)")
   func pipelineGenerateWithCFG() async throws {
-    let recipe = StandardMockRecipe(
+    let pipeline = try await StandardMockRecipe.loaded(
       encoderConfig: .init(embeddingDim: 4096, maxSeqLength: 120),
       schedulerConfig: .init(defaultTimesteps: [999, 0]),
       backboneConfig: .init(conditioningDim: 4096, latentChannels: 4, maxSequenceLength: 120),
@@ -196,8 +194,6 @@ struct PipelineAssemblyTests {
       rendererConfig: (),
       unconditionalEmbeddingStrategy: .emptyPrompt
     )
-
-    let pipeline = try DiffusionPipeline(recipe: recipe)
 
     let request = DiffusionGenerationRequest(
       prompt: "a beautiful sunset",
@@ -217,7 +213,7 @@ struct PipelineAssemblyTests {
 
   @Test("Pipeline generates with CFG (zero vector strategy)")
   func pipelineGenerateWithZeroVectorCFG() async throws {
-    let recipe = StandardMockRecipe(
+    let pipeline = try await StandardMockRecipe.loaded(
       encoderConfig: .init(embeddingDim: 4096, maxSeqLength: 120),
       schedulerConfig: .init(defaultTimesteps: [999, 0]),
       backboneConfig: .init(conditioningDim: 4096, latentChannels: 4, maxSequenceLength: 120),
@@ -225,8 +221,6 @@ struct PipelineAssemblyTests {
       rendererConfig: (),
       unconditionalEmbeddingStrategy: .zeroVector(shape: [1, 120, 4096])
     )
-
-    let pipeline = try DiffusionPipeline(recipe: recipe)
 
     let request = DiffusionGenerationRequest(
       prompt: "test",
@@ -243,7 +237,7 @@ struct PipelineAssemblyTests {
 
   @Test("Pipeline uses random seed when none provided")
   func pipelineRandomSeed() async throws {
-    let recipe = StandardMockRecipe(
+    let pipeline = try await StandardMockRecipe.loaded(
       encoderConfig: .init(embeddingDim: 4096, maxSeqLength: 120),
       schedulerConfig: .init(defaultTimesteps: [999]),
       backboneConfig: .init(conditioningDim: 4096, latentChannels: 4, maxSequenceLength: 120),
@@ -251,8 +245,6 @@ struct PipelineAssemblyTests {
       rendererConfig: (),
       unconditionalEmbeddingStrategy: .none
     )
-
-    let pipeline = try DiffusionPipeline(recipe: recipe)
 
     let request = DiffusionGenerationRequest(
       prompt: "test",
