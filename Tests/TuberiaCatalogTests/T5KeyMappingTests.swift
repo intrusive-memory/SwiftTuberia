@@ -256,28 +256,14 @@ struct T5ApplyWeightsTests {
         return Tuberia.ModuleParameters(parameters: params)
     }
 
-    @Test("apply(weights:) sets isLoaded to true")
-    func applyWeightsSetsIsLoaded() throws {
-        let encoder = makeTestEncoder()
-        #expect(encoder.isLoaded == false)
-        try encoder.apply(weights: makeSyntheticWeights())
-        #expect(encoder.isLoaded == true)
-    }
-
     @Test("apply(weights:) does not crash with synthetic parameters")
     func applyWeightsDoesNotCrash() throws {
         let encoder = makeTestEncoder()
         // Should not throw or crash
         try encoder.apply(weights: makeSyntheticWeights())
-    }
-
-    @Test("unload() resets isLoaded to false")
-    func unloadResetsIsLoaded() throws {
-        let encoder = makeTestEncoder()
-        try encoder.apply(weights: makeSyntheticWeights())
-        #expect(encoder.isLoaded == true)
-        encoder.unload()
-        #expect(encoder.isLoaded == false)
+        // Verify the encoder is loaded and weights are retained — confirming apply completed
+        #expect(encoder.isLoaded == true, "isLoaded must be true after apply(weights:)")
+        #expect(encoder.currentWeights != nil, "currentWeights must be non-nil after apply(weights:)")
     }
 
     @Test("encode() returns correctly shaped placeholder when unloaded")

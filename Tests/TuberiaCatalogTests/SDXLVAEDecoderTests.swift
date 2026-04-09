@@ -228,6 +228,60 @@ struct SDXLVAEDecoderTensorTransformTests {
     try! SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
   }()
 
+  // MARK: - Sortie 3: Tensor Transform Tests
+
+  /// 4D tensor with a key containing "conv" is transposed from NCHW to NHWC.
+  @Test("4D conv-keyed weight is transposed from NCHW to NHWC")
+  func convWeightIsTransposed() {
+    let transform = decoder.tensorTransform!
+    // Use asymmetric shape [8, 2, 5, 7] so axis reordering is unambiguous.
+    // transposed(0,2,3,1): [8, 2, 5, 7] → [8, 5, 7, 2]
+    let input = MLXArray.zeros([8, 2, 5, 7]).asType(.float32)
+    let result = transform("conv1.weight", input)
+    eval(result)
+    #expect(result.shape == [8, 5, 7, 2])
+  }
+
+  /// 1D bias with a key containing "conv" passes through unchanged (ndim != 4).
+  @Test("1D conv bias passes through tensorTransform unchanged")
+  func biasPassesThroughUnchanged() {
+    let transform = decoder.tensorTransform!
+    let values: [Float] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    let bias = MLXArray(values)
+    let result = transform("convOut.bias", bias)
+    eval(result)
+    #expect(result.shape == [8])
+    #expect(result.asArray(Float.self) == values)
+  }
+
+  /// 4D tensor whose key does NOT contain "conv" passes through unchanged.
+  @Test("4D non-conv tensor passes through tensorTransform unchanged")
+  func nonConvWeightPassesThroughUnchanged() {
+    let transform = decoder.tensorTransform!
+    let values: [Float] = Array(0..<24).map(Float.init)
+    let input = MLXArray(values, [2, 3, 2, 2])
+    let result = transform("norm1.weight", input)
+    eval(result)
+    #expect(result.shape == [2, 3, 2, 2])
+    #expect(result.asArray(Float.self) == values)
+  }
+
+  /// Verifies the exact axes (0,2,3,1) used by the transposition on concrete values.
+  @Test("tensorTransform uses axes (0,2,3,1): [out,in,kH,kW] → [out,kH,kW,in]")
+  func transpositionIsCorrect() {
+    let transform = decoder.tensorTransform!
+    // [out=2, in=3, kH=1, kW=1]: kH=kW=1 makes axis reordering unambiguous.
+    let values: [Float] = [0, 1, 2, 3, 4, 5]
+    let input = MLXArray(values, [2, 3, 1, 1])
+    let result = transform("postQuantConv.weight", input)
+    eval(result)
+    // transposed(0,2,3,1): [2,3,1,1] → [2,1,1,3]
+    #expect(result.shape == [2, 1, 1, 3])
+    #expect(input.shape[1] == 3)   // in-channels at axis 1 in input
+    #expect(result.shape[3] == 3)  // in-channels moved to axis 3 after transposition
+    #expect(result.asArray(Float.self) == values)
+  }
+
   @Test("tensorTransform transposes 4D conv weights from NCHW to NHWC")
   func conv4DTranspose() {
     let transform = decoder.tensorTransform!
@@ -324,6 +378,7 @@ struct SDXLVAEDecoderTensorTransformTests {
     let transposed = transform("conv_out.weight", tensor4D)
     #expect(transposed.shape == [4, 3, 3, 3])  // same dims for [4,3,3,3] but axes reordered
   }
+
 }
 
 // MARK: - apply(weights:) Tests

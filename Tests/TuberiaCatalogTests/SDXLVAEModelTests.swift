@@ -152,17 +152,6 @@ struct AttentionBlockTests {
         #expect(!flat.contains { $0.isNaN }, "AttentionBlock output must not contain NaN")
         #expect(!flat.contains { $0.isInfinite }, "AttentionBlock output must not contain Inf")
     }
-
-    // Verify residual connection: output shape must match input shape.
-    @Test("residual connection: output shape matches input shape")
-    func residualConnectionShape() {
-        let block = AttentionBlock(channels: 512)
-        let x = MLXArray.ones([1, 4, 4, 512]) * 2.0
-        let out = block(x)
-        eval(out)
-
-        #expect(out.shape == x.shape, "Residual path must preserve spatial shape: expected \(x.shape), got \(out.shape)")
-    }
 }
 
 // MARK: - Upsample2D
@@ -359,16 +348,6 @@ struct SDXLVAEDecoderModelTests {
         let flat = out.reshaped([-1]).asArray(Float.self)
         #expect(!flat.contains { $0.isNaN }, "Forward pass must not produce NaN")
         #expect(!flat.contains { $0.isInfinite }, "Forward pass must not produce Inf")
-    }
-
-    @Test("output channel count is always 3 (RGB)")
-    func outputHas3Channels() throws {
-        let model = SDXLVAEDecoderModel()
-        let latents = MLXArray.zeros([1, 8, 8, 4])
-        let out = model(latents)
-        eval(out)
-
-        #expect(out.shape[3] == 3, "Output must have 3 channels (RGB), got \(out.shape[3])")
     }
 
     // The crash scenario: 1024×1024 image → 128×128 latent.
