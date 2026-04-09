@@ -58,7 +58,8 @@ public struct WeightLoader: Sendable {
         let effectiveURLs: [URL]
         if directoryURL.path.contains("/Group Containers/") {
           // Check env var or default hardlink location
-          let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
+          let baseDir =
+            ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
             ?? "/tmp/vinetas-test-models"
           let tempDir = URL(fileURLWithPath: baseDir).appendingPathComponent(componentId)
           let tempURLs = findSafetensorsFiles(in: tempDir)

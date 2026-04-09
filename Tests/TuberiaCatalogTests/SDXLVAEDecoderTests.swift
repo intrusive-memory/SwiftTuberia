@@ -1,7 +1,7 @@
 import Foundation
-import Testing
 @preconcurrency import MLX
 import MLXNN
+import Testing
 import Tuberia
 
 @testable import TuberiaCatalog
@@ -71,13 +71,17 @@ struct SDXLVAEDecoderKeyMappingTests {
   @Test("decoder.mid_block.resnets.0 norm and conv components map correctly")
   func midBlockResnet0() {
     let mapping = decoder.keyMapping
-    #expect(mapping("decoder.mid_block.resnets.0.norm1.weight") == "midBlock.resnets.0.norm1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.norm1.weight") == "midBlock.resnets.0.norm1.weight")
     #expect(mapping("decoder.mid_block.resnets.0.norm1.bias") == "midBlock.resnets.0.norm1.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.conv1.weight") == "midBlock.resnets.0.conv1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.conv1.weight") == "midBlock.resnets.0.conv1.weight")
     #expect(mapping("decoder.mid_block.resnets.0.conv1.bias") == "midBlock.resnets.0.conv1.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.norm2.weight") == "midBlock.resnets.0.norm2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.norm2.weight") == "midBlock.resnets.0.norm2.weight")
     #expect(mapping("decoder.mid_block.resnets.0.norm2.bias") == "midBlock.resnets.0.norm2.bias")
-    #expect(mapping("decoder.mid_block.resnets.0.conv2.weight") == "midBlock.resnets.0.conv2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.0.conv2.weight") == "midBlock.resnets.0.conv2.weight")
     #expect(mapping("decoder.mid_block.resnets.0.conv2.bias") == "midBlock.resnets.0.conv2.bias")
   }
 
@@ -95,8 +99,10 @@ struct SDXLVAEDecoderKeyMappingTests {
   @Test("decoder.mid_block.resnets.1 maps correctly (no conv_shortcut)")
   func midBlockResnet1() {
     let mapping = decoder.keyMapping
-    #expect(mapping("decoder.mid_block.resnets.1.norm1.weight") == "midBlock.resnets.1.norm1.weight")
-    #expect(mapping("decoder.mid_block.resnets.1.conv2.weight") == "midBlock.resnets.1.conv2.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.1.norm1.weight") == "midBlock.resnets.1.norm1.weight")
+    #expect(
+      mapping("decoder.mid_block.resnets.1.conv2.weight") == "midBlock.resnets.1.conv2.weight")
   }
 
   // MARK: mid_block attention
@@ -277,7 +283,7 @@ struct SDXLVAEDecoderTensorTransformTests {
     eval(result)
     // transposed(0,2,3,1): [2,3,1,1] → [2,1,1,3]
     #expect(result.shape == [2, 1, 1, 3])
-    #expect(input.shape[1] == 3)   // in-channels at axis 1 in input
+    #expect(input.shape[1] == 3)  // in-channels at axis 1 in input
     #expect(result.shape[3] == 3)  // in-channels moved to axis 3 after transposition
     #expect(result.asArray(Float.self) == values)
   }
@@ -762,8 +768,8 @@ struct SDXLVAEDecoderForwardPassTests {
     let outShape = output.data.shape
     #expect(outShape.count == 4)
     #expect(outShape[0] == 1)
-    #expect(outShape[1] == 32)   // 4 * 8
-    #expect(outShape[2] == 48)   // 6 * 8
+    #expect(outShape[1] == 32)  // 4 * 8
+    #expect(outShape[2] == 48)  // 6 * 8
     #expect(outShape[3] == 3)
   }
 
@@ -900,7 +906,8 @@ struct SDXLVAEDecoderModelForwardTests {
     let input = MLXArray.zeros([1, 8, 8, 4])
     let output = model(input)
     eval(output)
-    #expect(output.ndim == 4, "Output must be 4-dimensional — ndim=0 indicates a shapeless-tensor crash")
+    #expect(
+      output.ndim == 4, "Output must be 4-dimensional — ndim=0 indicates a shapeless-tensor crash")
   }
 
   /// Verify output shape is preserved for the actual latent size from a 512×512 generation.

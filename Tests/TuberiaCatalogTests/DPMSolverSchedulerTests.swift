@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @preconcurrency import MLX
+import Testing
 
 @testable import TuberiaCatalog
 
@@ -189,7 +189,9 @@ struct DPMSolverStepTests {
     )
     eval(result)
 
-    #expect(result.shape == [1, 8, 8, 4], "Output shape \(result.shape) should equal input shape [1, 8, 8, 4]")
+    #expect(
+      result.shape == [1, 8, 8, 4],
+      "Output shape \(result.shape) should equal input shape [1, 8, 8, 4]")
   }
 
   // MARK: addNoiseIncreasesL2Norm
@@ -235,6 +237,8 @@ struct DPMSolverStepTests {
     let result = scheduler.addNoise(to: sample, noise: noise, at: 100)
     eval(result)
 
-    #expect(result.shape == [2, 16, 16, 8], "addNoise() shape \(result.shape) should equal input shape [2, 16, 16, 8]")
+    #expect(
+      result.shape == [2, 16, 16, 8],
+      "addNoise() shape \(result.shape) should equal input shape [2, 16, 16, 8]")
   }
 }

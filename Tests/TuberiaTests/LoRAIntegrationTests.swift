@@ -1,7 +1,7 @@
 import Foundation
+@preconcurrency import MLX
 import Testing
 
-@preconcurrency import MLX
 @testable import Tuberia
 
 // MARK: - LoRA Integration Tests
@@ -175,7 +175,7 @@ struct LoRAIntegrationTests {
 
     // After apply: currentWeights should be the applied weights
     let weights = ModuleParameters(parameters: [
-      "key1": MLXArray([Float32(1.0), 2.0]),
+      "key1": MLXArray([Float32(1.0), 2.0])
     ])
     try segment.apply(weights: weights)
     #expect(segment.currentWeights != nil)

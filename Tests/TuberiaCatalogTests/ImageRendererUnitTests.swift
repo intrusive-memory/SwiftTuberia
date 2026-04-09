@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
-import Testing
 @preconcurrency import MLX
+import Testing
 
 @testable import TuberiaCatalog
 
@@ -167,7 +167,9 @@ struct ImageRendererConversionTests {
       return
     }
 
-    #expect(cgImage.bitsPerComponent == 8, "Expected 8 bits per component, got \(cgImage.bitsPerComponent)")
+    #expect(
+      cgImage.bitsPerComponent == 8,
+      "Expected 8 bits per component, got \(cgImage.bitsPerComponent)")
   }
 
   @Test("outputColorSpaceIsSRGB")

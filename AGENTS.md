@@ -2,11 +2,19 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.2.7
+**Version**: 0.3.0
 
 ---
 
 ## Recent Changes
+
+### v0.3.0
+- **Test coverage remediation**: removed 6 redundant tests; added 3 new test files (`DPMSolverSchedulerTests`, `FlowMatchEulerSchedulerTests`, `ImageRendererUnitTests`) and 3 new suites (`SDXLVAEDecoderTensorTransformTests`, `LoRAKeyConventionTests`, `PipelineErrorTests`); strengthened `applyWeightsDoesNotCrash`; added edge-case tests to `DeviceCapabilityTests`.
+- **WeightLoader refactor**: `loadFromPath()` now `async throws`; routes all local file I/O through `AcervoManager.withLocalAccess` (SwiftAcervo 0.6.0). Tuberia no longer calls `FileManager` directly.
+- **DiffusionPipeline**: `generate()` now guards `encoder.isLoaded`, `backbone.isLoaded`, `decoder.isLoaded` at entry, throwing `PipelineError.missingComponent(role:)` if any segment is unloaded.
+- **MockPipelineRecipe**: added `loaded()` test factory; test weight loading moved to `DiffusionPipeline+TestSupport.swift` extension.
+- **LoRA interop docs**: AGENTS.md and README.md now document the `base_model.model.` prefix gap for PEFT/flux-2 adapters and downstream package interop status.
+- Bumped `SwiftAcervo` to `0.6.0`.
 
 ### v0.2.7
 - Patch release — documentation and organizational update (AGENTS.md/CLAUDE.md/GEMINI.md).

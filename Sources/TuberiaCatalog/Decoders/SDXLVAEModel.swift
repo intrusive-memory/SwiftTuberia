@@ -140,7 +140,7 @@ final class AttentionBlock: MLXNN.Module {
     hidden = hidden.reshaped([b, seqLen, c])  // [B, H*W, C]
 
     let q = query(hidden)  // [B, H*W, C]
-    let k = key(hidden)    // [B, H*W, C]
+    let k = key(hidden)  // [B, H*W, C]
     let v = value(hidden)  // [B, H*W, C]
 
     // Use MLXFast.scaledDotProductAttention (flash attention) instead of materialising
@@ -163,8 +163,8 @@ final class AttentionBlock: MLXNN.Module {
 
     // Remove numHeads dimension and project back to spatial layout
     let squeezed = attnOut.reshaped([b, seqLen, c])  // [B, H*W, C]
-    var out = projAttn(squeezed)                       // [B, H*W, C]
-    out = out.reshaped([b, h, w, c])                   // [B, H, W, C]
+    var out = projAttn(squeezed)  // [B, H*W, C]
+    out = out.reshaped([b, h, w, c])  // [B, H, W, C]
 
     return x + out
   }
