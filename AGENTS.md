@@ -2,11 +2,17 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.3.0
+**Version**: 0.3.2
 
 ---
 
 ## Recent Changes
+
+### v0.3.2
+- **WeightLoader bug fix**: Hardlink bypass for App Group Container now only activates when the process cannot actually enumerate the directory (`canEnumerateDirectory` check). Prevents stale `/tmp` hardlinks from shadowing real model files in the entitled Vinetas app. Root cause: SwiftAcervo 0.5.6's `withModelAccess()` fallback correctly resolved short component IDs (e.g. `"t5-xxl-encoder-int4"`) to their App Group Container path, exposing the over-broad bypass condition.
+
+### v0.3.1
+- **VAE weight fix**: Removed double-transpose in `tensorTransform` — SDXL VAE weights are already in MLX format.
 
 ### v0.3.0
 - **Test coverage remediation**: removed 6 redundant tests; added 3 new test files (`DPMSolverSchedulerTests`, `FlowMatchEulerSchedulerTests`, `ImageRendererUnitTests`) and 3 new suites (`SDXLVAEDecoderTensorTransformTests`, `LoRAKeyConventionTests`, `PipelineErrorTests`); strengthened `applyWeightsDoesNotCrash`; added edge-case tests to `DeviceCapabilityTests`.

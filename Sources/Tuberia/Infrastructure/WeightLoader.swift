@@ -51,12 +51,15 @@ public struct WeightLoader: Sendable {
         }
 
         // If in a macOS App Group Container, MACF blocks open() for unentitled processes
-        // (e.g. xctest without com.apple.security.application-groups). Check if the shell
-        // pre-created hardlinks in /tmp/vinetas-test-models/{componentId}/ using `ln`
-        // (permitted from shell context). Hardlinks in /tmp bypass the Container Manager
-        // MACF check because the open path doesn't traverse the protected directory.
+        // (e.g. xctest without com.apple.security.application-groups). Only apply the
+        // hardlink bypass when the process cannot actually enumerate the directory —
+        // i.e. when the enumerator fast path failed and we're relying on stat-only probes.
+        // Entitled processes (the real app) can enumerate directly, so skipping the bypass
+        // prevents stale /tmp hardlinks from shadowing the real model files.
         let effectiveURLs: [URL]
-        if directoryURL.path.contains("/Group Containers/") {
+        if directoryURL.path.contains("/Group Containers/"),
+          !canEnumerateDirectory(directoryURL)
+        {
           // Check env var or default hardlink location
           let baseDir =
             ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
@@ -170,6 +173,22 @@ public struct WeightLoader: Sendable {
   }
 
   // MARK: - Private Helpers
+
+  /// Returns true if the calling process can enumerate (opendir) the given directory.
+  ///
+  /// Used to distinguish between an entitled process that has App Group container access
+  /// (returns `true`) and an unentitled xctest process that can stat but not open files
+  /// in the container (returns `false`).
+  private static func canEnumerateDirectory(_ directory: URL) -> Bool {
+    guard
+      let enumerator = FileManager.default.enumerator(
+        at: directory,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+      )
+    else { return false }
+    return enumerator.nextObject() != nil
+  }
 
   /// Find all `.safetensors` files in a directory.
   ///
