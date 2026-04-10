@@ -11,8 +11,8 @@ import Tuberia
 /// Output: `DecodedOutput` with `ImageDecoderMetadata` and pixel data [B, H, W, 3]
 ///
 /// Key mapping translates SDXL VAE safetensors keys (diffusers format) to
-/// MLX module property paths. Tensor transposition converts NCHW → NHWC for
-/// all 4D convolution weight tensors.
+/// MLX module property paths. CDN weights are stored in MLX NHWC format already;
+/// no tensor transposition is applied.
 public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
   public typealias Configuration = SDXLVAEDecoderConfiguration
 
@@ -164,23 +164,12 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     }
   }
 
-  /// Transposes 4D convolution weight tensors from NCHW [out, in, kH, kW]
-  /// to NHWC [out, kH, kW, in] as required by MLX Conv2d.
-  ///
-  /// Matches keys containing "conv" (case-insensitive) to handle both snake_case
-  /// (`post_quant_conv`) and camelCase (`postQuantConv`) variants after key mapping.
-  ///
-  /// GroupNorm weight/bias (1D) and Linear weight/bias (2D) are passed through unchanged.
-  public var tensorTransform: TensorTransform? {
-    { key, tensor in
-      // Transpose conv weights: [out, in, kH, kW] → [out, kH, kW, in]
-      // Case-insensitive match to handle both "conv" and "Conv" (camelCase property names)
-      if key.lowercased().contains("conv") && tensor.ndim == 4 {
-        return tensor.transposed(0, 2, 3, 1)
-      }
-      return tensor
-    }
-  }
+  /// No tensor transform needed — CDN weights are already stored in MLX NHWC
+  /// format `[out, kH, kW, in]`. Applying a transposition here would corrupt
+  /// `in_channels` (e.g. `[512, 3, 3, 4]` → `[512, 3, 4, 3]`), causing MLX
+  /// Conv2d to produce 0D error tensors that propagate as crashes during the
+  /// VAE upsample passes.
+  public var tensorTransform: TensorTransform? { nil }
 
   /// Loads `ModuleParameters` into the `SDXLVAEDecoderModel` module tree.
   ///
