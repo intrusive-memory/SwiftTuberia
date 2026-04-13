@@ -71,13 +71,16 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
       // silently when acervoDir is an App Group Container path.
       //
       // WeightLoader already works around this by using pre-hardlinked files in
-      // /tmp/vinetas-test-models/<componentId>/ (created by `make link-pixart-models`).
+      // /tmp/vinetas-test-models/<componentId>/ (created by `make link-test-models`).
       // We apply the same check here so the tokenizer uses the same accessible directory.
+      //
+      // The redirect requires VINETAS_TEST_MODELS_DIR to be explicitly set (e.g. via
+      // the Makefile's `test-gpu` target). Unit tests that do NOT set this env var will
+      // not redirect, so they remain isolated from GPU-test hardlinks in /tmp.
       let effectiveDir: URL
-      if acervoDir.path.contains("/Group Containers/") {
-        let baseDir =
-          ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
-          ?? "/tmp/vinetas-test-models"
+      if acervoDir.path.contains("/Group Containers/"),
+        let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
+      {
         let tempDir = URL(fileURLWithPath: baseDir)
           .appendingPathComponent(configuration.componentId)
         let tokenizerJSON = tempDir.appendingPathComponent("tokenizer.json")

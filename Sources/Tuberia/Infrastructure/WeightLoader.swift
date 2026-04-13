@@ -56,14 +56,15 @@ public struct WeightLoader: Sendable {
         // i.e. when the enumerator fast path failed and we're relying on stat-only probes.
         // Entitled processes (the real app) can enumerate directly, so skipping the bypass
         // prevents stale /tmp hardlinks from shadowing the real model files.
+        //
+        // The redirect requires VINETAS_TEST_MODELS_DIR to be explicitly set (e.g. via
+        // the Makefile's `test-gpu` target). Unit tests that do NOT set this env var will
+        // not redirect, so they remain isolated from GPU-test hardlinks in /tmp.
         let effectiveURLs: [URL]
         if directoryURL.path.contains("/Group Containers/"),
-          !canEnumerateDirectory(directoryURL)
+          !canEnumerateDirectory(directoryURL),
+          let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
         {
-          // Check env var or default hardlink location
-          let baseDir =
-            ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
-            ?? "/tmp/vinetas-test-models"
           let tempDir = URL(fileURLWithPath: baseDir).appendingPathComponent(componentId)
           let tempURLs = findSafetensorsFiles(in: tempDir)
           if !tempURLs.isEmpty {
