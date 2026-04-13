@@ -56,15 +56,42 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   /// `configuration.componentId`).
   public func loadTokenizer() async {
     do {
-      // Step 1: Obtain the model directory URL synchronously via Acervo.
-      // withModelAccess takes a synchronous closure, so we extract the URL
-      // and call the async AutoTokenizer.from() outside the closure.
-      let modelDir = try await AcervoManager.shared.withModelAccess(configuration.componentId) {
+      // Step 1: Obtain the model directory URL via Acervo.
+      let acervoDir = try await AcervoManager.shared.withModelAccess(configuration.componentId) {
         directoryURL -> URL in
         directoryURL
       }
-      // Step 2: Load the tokenizer asynchronously from the resolved directory.
-      let tok = try await AutoTokenizer.from(modelFolder: modelDir)
+
+      // Step 2: Apply the same MACF-aware redirect as WeightLoader.
+      //
+      // On macOS, MACF (Mandatory Access Control Framework) blocks open() on files inside
+      // ~/Library/Group Containers/… for processes that lack the
+      // com.apple.security.application-groups entitlement — including xctest.
+      // AutoTokenizer.from(modelFolder:) reads JSON files via open(), so it fails
+      // silently when acervoDir is an App Group Container path.
+      //
+      // WeightLoader already works around this by using pre-hardlinked files in
+      // /tmp/vinetas-test-models/<componentId>/ (created by `make link-pixart-models`).
+      // We apply the same check here so the tokenizer uses the same accessible directory.
+      let effectiveDir: URL
+      if acervoDir.path.contains("/Group Containers/") {
+        let baseDir =
+          ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
+          ?? "/tmp/vinetas-test-models"
+        let tempDir = URL(fileURLWithPath: baseDir)
+          .appendingPathComponent(configuration.componentId)
+        let tokenizerJSON = tempDir.appendingPathComponent("tokenizer.json")
+        if FileManager.default.fileExists(atPath: tokenizerJSON.path) {
+          effectiveDir = tempDir
+        } else {
+          effectiveDir = acervoDir
+        }
+      } else {
+        effectiveDir = acervoDir
+      }
+
+      // Step 3: Load the tokenizer from the resolved directory.
+      let tok = try await AutoTokenizer.from(modelFolder: effectiveDir)
       self.tokenizer = tok
     } catch {
       // Non-fatal: encode() falls back to placeholder tokenization when tokenizer is nil.
