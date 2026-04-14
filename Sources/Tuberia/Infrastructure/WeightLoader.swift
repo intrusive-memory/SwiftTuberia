@@ -50,19 +50,23 @@ public struct WeightLoader: Sendable {
           )
         }
 
-        // If in a macOS App Group Container, MACF blocks open() for unentitled processes
-        // (e.g. xctest without com.apple.security.application-groups). Only apply the
-        // hardlink bypass when the process cannot actually enumerate the directory —
-        // i.e. when the enumerator fast path failed and we're relying on stat-only probes.
-        // Entitled processes (the real app) can enumerate directly, so skipping the bypass
-        // prevents stale /tmp hardlinks from shadowing the real model files.
+        // If in a macOS App Group Container, MACF blocks fopen() for unentitled processes
+        // (e.g. xctest without com.apple.security.application-groups). The guard is:
         //
-        // The redirect requires VINETAS_TEST_MODELS_DIR to be explicitly set (e.g. via
-        // the Makefile's `test-gpu` target). Unit tests that do NOT set this env var will
-        // not redirect, so they remain isolated from GPU-test hardlinks in /tmp.
+        //   1. The directory is inside a Group Containers path (App Group container).
+        //   2. VINETAS_TEST_MODELS_DIR is explicitly set (only the Makefile GPU/fixture
+        //      test targets set this — unit tests never do, so they stay isolated from
+        //      /tmp hardlinks).
+        //
+        // NOTE: We intentionally do NOT check `canEnumerateDirectory` here.
+        // macOS MACF blocks fopen() (file content reads) but still allows opendir/stat,
+        // so `FileManager.enumerator` returns results even when `fopen()` would fail.
+        // Using !canEnumerateDirectory as the bypass signal is wrong — it would prevent
+        // the bypass from firing on machines where the directory CAN be enumerated but
+        // fopen() is still blocked by MACF (which is the common case on developer Macs).
+        // The VINETAS_TEST_MODELS_DIR guard is sufficient: only GPU test targets set it.
         let effectiveURLs: [URL]
         if directoryURL.path.contains("/Group Containers/"),
-          !canEnumerateDirectory(directoryURL),
           let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
         {
           let tempDir = URL(fileURLWithPath: baseDir).appendingPathComponent(componentId)
