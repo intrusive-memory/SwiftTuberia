@@ -20,7 +20,8 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
   private let trainTimesteps: Int
 
   // State for multistep (second-order)
-  private var previousOutputs: [MLXArray] = []
+  // Stores (predicted_x0, timestep) pairs from previous steps.
+  private var previousOutputs: [(MLXArray, Int)] = []
   private var currentPlan: SchedulerPlan?
 
   public required init(configuration: Configuration) {
@@ -110,18 +111,19 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
         sample: sample
       )
     } else {
-      // Second-order (midpoint) step using previous output
-      let prevPredicted = previousOutputs.last!
+      // Second-order (midpoint) step using previous x0 prediction + its timestep
+      let (prevPredicted, prevTimestep) = previousOutputs.last!
       result = dpmSolverSecondOrderStep(
         predictedOriginal: predictedOriginal,
         previousPredicted: prevPredicted,
         timestep: timestep,
+        previousTimestep: prevTimestep,
         sample: sample
       )
     }
 
-    // Store for multistep
-    previousOutputs.append(predictedOriginal)
+    // Store x0 prediction + current timestep for next step's second-order correction.
+    previousOutputs.append((predictedOriginal, timestep))
     // Keep only the last (solverOrder - 1) outputs for multistep
     if previousOutputs.count > configuration.solverOrder {
       previousOutputs.removeFirst()
@@ -140,7 +142,7 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
   }
 
   public func reset() {
-    previousOutputs.removeAll()
+    previousOutputs.removeAll(keepingCapacity: true)
     currentPlan = nil
   }
 
@@ -179,24 +181,89 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
     return sqrtAlphaPrev * predictedOriginal + sqrtOneMinusAlphaPrev * predictedNoise
   }
 
-  /// Second-order DPM-Solver++ step (midpoint method).
+  /// Second-order DPM-Solver++(2M) step (midpoint method).
+  ///
+  /// Implements the exact DPM-Solver++(2M) update from Lu et al. (2022), matching
+  /// the diffusers `DPMSolverMultistepScheduler` with `solver_type="midpoint"`:
+  ///
+  /// ```
+  /// lambda_t  = log(alpha_t)  - log(sigma_t)   (log-SNR at target timestep)
+  /// lambda_s0 = log(alpha_s0) - log(sigma_s0)  (log-SNR at current timestep)
+  /// lambda_s1 = log(alpha_s1) - log(sigma_s1)  (log-SNR at previous timestep)
+  /// h   = lambda_t  - lambda_s0
+  /// h_0 = lambda_s0 - lambda_s1
+  /// r0  = h_0 / h
+  /// D0  = m0                         (current denoised prediction)
+  /// D1  = (1/r0) * (m0 - m1)         (first-order finite difference)
+  /// x_t = (sigma_t/sigma_s0)*sample - alpha_t*(exp(-h)-1)*D0 - 0.5*alpha_t*(exp(-h)-1)*D1
+  /// ```
+  ///
+  /// where:
+  /// - `alpha_t   = sqrt(alphaCumprod[t_target])`
+  /// - `sigma_t   = sqrt(1 - alphaCumprod[t_target])`
+  /// - `alpha_s0  = sqrt(alphaCumprod[t_current])`
+  /// - `sigma_s0  = sqrt(1 - alphaCumprod[t_current])`
+  /// - `alpha_s1  = sqrt(alphaCumprod[t_previous])`
+  /// - `sigma_s1  = sqrt(1 - alphaCumprod[t_previous])`
   private func dpmSolverSecondOrderStep(
-    predictedOriginal: MLXArray,
-    previousPredicted: MLXArray,
-    timestep: Int,
-    sample: MLXArray
+    predictedOriginal: MLXArray,   // m0: current denoised prediction (x0 at s0)
+    previousPredicted: MLXArray,   // m1: previous denoised prediction (x0 at s1)
+    timestep: Int,                 // s0: current timestep
+    previousTimestep: Int,         // s1: previous timestep (one step further back)
+    sample: MLXArray               // x_{s0}: current noisy sample
   ) -> MLXArray {
-    // For second-order, we use a linear combination of current and previous predictions
-    // This implements the DPM-Solver++(2M) update:
-    // x0_corrected = 0.5 * (3 * x0_current - x0_previous)
-    let correctedPrediction = 1.5 * predictedOriginal - 0.5 * previousPredicted
+    // Target timestep = the one we're stepping TO (next in the denoising direction)
+    let targetTimestep = findPreviousTimestep(current: timestep)  // t (lower noise)
 
-    // Then apply the first-order step with the corrected prediction
-    return dpmSolverFirstOrderStep(
-      predictedOriginal: correctedPrediction,
-      timestep: timestep,
-      sample: sample
-    )
+    // Alpha cumulative products for t, s0, s1
+    let acT = alphaCumprod(at: targetTimestep)
+    let acS0 = alphaCumprod(at: timestep)
+    let acS1 = alphaCumprod(at: previousTimestep)
+
+    // alpha and sigma in DPM-Solver++ notation (alpha = sqrt(ac), sigma = sqrt(1-ac))
+    let alphaT  = Float(Foundation.sqrt(acT))
+    let sigmaT  = Float(Foundation.sqrt(max(1.0 - acT, 1e-8)))
+    let alphaS0 = Float(Foundation.sqrt(acS0))
+    let sigmaS0 = Float(Foundation.sqrt(max(1.0 - acS0, 1e-8)))
+    let alphaS1 = Float(Foundation.sqrt(acS1))
+    let sigmaS1 = Float(Foundation.sqrt(max(1.0 - acS1, 1e-8)))
+
+    // Log-SNR: lambda = log(alpha) - log(sigma)
+    let lambdaT  = Foundation.log(alphaT)  - Foundation.log(sigmaT)
+    let lambdaS0 = Foundation.log(alphaS0) - Foundation.log(sigmaS0)
+    let lambdaS1 = Foundation.log(alphaS1) - Foundation.log(sigmaS1)
+
+    // Log-SNR differences
+    let h  = lambdaT  - lambdaS0  // h > 0 means moving toward lower noise
+    let h0 = lambdaS0 - lambdaS1  // h0 > 0 (s1 is earlier / higher noise than s0)
+    let r0 = max(h0 / h, 1e-8)    // ratio, guard against zero
+
+    // D0 = current prediction, D1 = first-order finite difference
+    // D1 = (m0 - m1) / r0
+    // Compute as MLX: D1_coefficient = Float(1.0/r0)
+    let d1Coeff = Float(1.0 / r0)
+    let d1 = d1Coeff * (predictedOriginal - previousPredicted)
+
+    // DPM-Solver++(2M) midpoint update:
+    // x_t = (sigma_t/sigma_s0)*sample - alpha_t*(exp(-h)-1)*(D0 + 0.5*D1)
+    let expMinusH = Foundation.exp(-h)
+    let coeff = Float(-alphaT * (expMinusH - 1.0))  // positive when exp(-h) < 1 (h > 0)
+    let sigmaTOverS0 = Float(sigmaT / sigmaS0)
+
+    return sigmaTOverS0 * sample + coeff * (predictedOriginal + 0.5 * d1)
+  }
+
+  /// Look up alpha_cumprod at the given timestep index (clamped to valid range).
+  ///
+  /// Returns 1.0 for the fully-denoised terminal state (timestep < 0), which
+  /// is only used when `findPreviousTimestep` returns -1 (not applicable here).
+  /// For t=0, returns alphasCumprod[0] ≈ 0.9999 (effectively denoised).
+  private func alphaCumprod(at timestep: Int) -> Float {
+    guard timestep >= 0 else {
+      return 1.0  // terminal denoised state
+    }
+    let idx = min(timestep, alphasCumprod.count - 1)
+    return alphasCumprod[max(0, idx)]
   }
 
   // MARK: - Beta Schedule Computation
@@ -208,6 +275,17 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
       return (0..<trainTimesteps).map { i in
         let t = Float(i) / Float(trainTimesteps - 1)
         return betaStart + t * (betaEnd - betaStart)
+      }
+
+    case .scaledLinear(let betaStart, let betaEnd):
+      // Matches HuggingFace "scaled_linear": linspace(sqrt(start), sqrt(end), T)²
+      // Used by PixArt-Sigma, SD 1.x/2.x, SDXL.
+      let sqrtStart = sqrt(betaStart)
+      let sqrtEnd = sqrt(betaEnd)
+      return (0..<trainTimesteps).map { i in
+        let t = Float(i) / Float(trainTimesteps - 1)
+        let sqrtBeta = sqrtStart + t * (sqrtEnd - sqrtStart)
+        return sqrtBeta * sqrtBeta
       }
 
     case .cosine:

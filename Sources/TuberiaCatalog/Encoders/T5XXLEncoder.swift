@@ -254,10 +254,35 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   }
 
   /// Static key mapping function, separated for testability.
+  ///
+  /// For int4-quantized weights, the safetensors contains triplets:
+  ///   `<base>.weight` (U32 packed), `<base>.scales` (F16), `<base>.biases` (F16).
+  ///
+  /// The sidecar `.scales` and `.biases` keys are mapped to
+  ///   `<mappedBase>.__scales` and `<mappedBase>.__biases`
+  /// so they survive the WeightLoader key filtering and are available in `apply(weights:)`
+  /// for dequantization. These synthetic keys are NOT module parameter paths — they are
+  /// consumed and removed during dequantization in `apply(weights:)`.
   static func mapKey(_ key: String) -> String? {
     // Skip decoder and language model head keys — encoder-only model
     if key.hasPrefix("decoder.") || key.hasPrefix("lm_head.") {
       return nil
+    }
+
+    // Handle int4 quantization sidecar keys by stripping the sidecar suffix,
+    // mapping the base key, then re-appending a private sidecar marker.
+    for sidecar in [".scales", ".biases"] {
+      if key.hasSuffix(sidecar) {
+        let baseKey = String(key.dropLast(sidecar.count))
+        // Map the base key as if it were the .weight key
+        let baseAsWeight = baseKey + ".weight"
+        if let mappedBase = mapKey(baseAsWeight) {
+          // mappedBase ends in the weight mapped key (e.g. "blocks.0.attention.q")
+          // Store sidecar with a private prefix so apply(weights:) can find them
+          return mappedBase + ".__" + String(sidecar.dropFirst(1))  // e.g. "blocks.0.attention.q.__scales"
+        }
+        return nil
+      }
     }
 
     // Shared token embedding table
@@ -327,17 +352,71 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   }
 
   public func apply(weights: Tuberia.ModuleParameters) throws {
-    // Build the flat key → MLXArray mapping using our key mapping function,
-    // then unflatten it into a NestedDictionary<String, MLXArray> that
-    // MLXNN.Module.update(parameters:) can consume.
-    var flatMapped: [(String, MLXArray)] = []
-    for (safetensorsKey, tensor) in weights.parameters {
-      if let mappedKey = T5XXLEncoder.mapKey(safetensorsKey) {
-        flatMapped.append((mappedKey, tensor))
+    // The T5-XXL int4-quantized safetensors stores weight matrices as packed int4 triplets:
+    //   <base>.weight  — U32 packed, shape [outDim, inDim/8]
+    //   <base>.scales  — F16, shape [outDim, numGroups]  (numGroups = inDim/64)
+    //   <base>.biases  — F16, shape [outDim, numGroups]  (zero-point)
+    //
+    // The WeightLoader key mapping (mapKey) translates these to:
+    //   <mappedBase>            — the raw U32 packed tensor (mapped from <base>.weight)
+    //   <mappedBase>.__scales   — F16 scales sidecar (private synthetic key)
+    //   <mappedBase>.__biases   — F16 biases sidecar (private synthetic key)
+    //
+    // This apply(weights:) function receives the already-mapped keys in weights.parameters.
+    // It must:
+    //  1. Collect .__scales and .__biases sidecars by base mapped key.
+    //  2. For each weight key that has sidecars (U32 dtype): dequantize and transpose.
+    //  3. Pass non-quantized tensors (layer norms, embeddings) through unchanged.
+    //  4. Strip sidecar keys from the parameter dict before calling model.update().
+    //
+    // After dequantization, shape is [outDim, inDim] (PyTorch row-major).
+    // T5TransformerEncoder uses matmul(x, w) directly (not via Linear), requiring
+    // [inDim, outDim] column-major layout — so we TRANSPOSE the dequantized weight.
+
+    // First pass: collect .__scales and .__biases by base mapped key.
+    var scalesMap: [String: MLXArray] = [:]
+    var biasesMap: [String: MLXArray] = [:]
+    for (key, tensor) in weights.parameters {
+      if key.hasSuffix(".__scales") {
+        let base = String(key.dropLast(".__scales".count))
+        scalesMap[base] = tensor
+      } else if key.hasSuffix(".__biases") {
+        let base = String(key.dropLast(".__biases".count))
+        biasesMap[base] = tensor
       }
     }
 
-    // Build or reuse the transformer module
+    // Second pass: dequantize + transpose int4 weights, pass others through.
+    // Skip sidecar keys — they're consumed here, not forwarded to model.update().
+    var flatMapped: [(String, MLXArray)] = []
+    for (mappedKey, tensor) in weights.parameters {
+      if mappedKey.hasSuffix(".__scales") || mappedKey.hasSuffix(".__biases") {
+        continue
+      }
+
+      let tensorToStore: MLXArray
+      if tensor.dtype == .uint32,
+        let scales = scalesMap[mappedKey],
+        let biases = biasesMap[mappedKey]
+      {
+        // Dequantize: [outDim, inDim/8] → [outDim, inDim] in float16
+        let floatWeight = dequantized(tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
+          .asType(.float16)
+        // Transpose to [inDim, outDim] for direct matmul(x, w) in T5 layers.
+        tensorToStore = floatWeight.transposed(1, 0)
+      } else if mappedKey == "relative_position_bias" {
+        // The safetensors stores this as [num_buckets=32, num_heads=64] (transposed relative
+        // to T5TransformerEncoder's expected [num_heads=64, num_buckets=32] layout).
+        // Transpose so computeRelativePositionBias() gathers correctly.
+        tensorToStore = tensor.transposed(1, 0)
+      } else {
+        tensorToStore = tensor
+      }
+
+      flatMapped.append((mappedKey, tensorToStore))
+    }
+
+    // Build or reuse the transformer module.
     let model: T5TransformerEncoder
     if let existing = self.transformer {
       model = existing
@@ -345,8 +424,7 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
       model = T5TransformerEncoder()
     }
 
-    // Unflatten the mapped parameters into MLXNN.ModuleParameters
-    // (NestedDictionary<String, MLXArray>) and load into the module.
+    // Unflatten the mapped parameters into MLXNN.ModuleParameters and load.
     let mlxParams = MLXNN.ModuleParameters.unflattened(flatMapped)
     model.update(parameters: mlxParams)
 
