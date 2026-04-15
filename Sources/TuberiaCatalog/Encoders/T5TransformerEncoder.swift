@@ -102,10 +102,13 @@ public final class T5Attention: MLXNN.Module {
     let vReshaped = vProj.reshaped([batchSize, seqLen, numHeads, headDim])
       .transposed(0, 2, 1, 3)
 
-    // Scaled dot-product attention
+    // T5 attention is intentionally unscaled — the relative position bias was trained
+    // without the 1/sqrt(d_k) normalisation factor. Applying it weakens the position
+    // bias relative to training and corrupts the learned attention distribution.
+    // See: Raffel et al. (2020), "Exploring the Limits of Transfer Learning with a
+    // Unified Text-to-Text Transformer", Appendix A.
     // scores: [B, num_heads, seq_len, seq_len]
-    let scale = Float(1.0 / sqrt(Double(headDim)))
-    var scores = MLX.matmul(qReshaped, kReshaped.transposed(0, 1, 3, 2)) * scale
+    var scores = MLX.matmul(qReshaped, kReshaped.transposed(0, 1, 3, 2))
 
     // Add relative position bias if provided
     if let bias = positionBias {

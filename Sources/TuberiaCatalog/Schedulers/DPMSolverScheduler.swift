@@ -23,6 +23,9 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
   // Stores (predicted_x0, timestep) pairs from previous steps.
   private var previousOutputs: [(MLXArray, Int)] = []
   private var currentPlan: SchedulerPlan?
+  /// Zero-based index of the current denoising step within the plan.
+  /// Used to detect the final step for `lowerOrderFinal` behaviour.
+  private var stepIndex: Int = 0
 
   public required init(configuration: Configuration) {
     self.configuration = configuration
@@ -100,11 +103,23 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
       predictedOriginal = output
     }
 
-    // DPM-Solver++ update step
+    // DPM-Solver++ update step.
+    //
+    // Use first-order (DDIM) when:
+    //   • solver_order == 1 (always first-order)
+    //   • step 0 (no previous output to form a finite difference)
+    //   • final step with lowerOrderFinal=true (matches diffusers behaviour — the
+    //     terminal sigma is effectively 0 so the first-order formula is exact)
+    let totalSteps = currentPlan?.timesteps.count ?? Int.max
+    let isLastStep = stepIndex == totalSteps - 1
+    let useFirstOrder =
+      configuration.solverOrder == 1
+      || previousOutputs.isEmpty
+      || (configuration.lowerOrderFinal && isLastStep)
+
     let result: MLXArray
 
-    if configuration.solverOrder == 1 || previousOutputs.isEmpty {
-      // First-order (Euler-like) step
+    if useFirstOrder {
       result = dpmSolverFirstOrderStep(
         predictedOriginal: predictedOriginal,
         timestep: timestep,
@@ -129,6 +144,7 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
       previousOutputs.removeFirst()
     }
 
+    stepIndex += 1
     return result
   }
 
@@ -144,6 +160,7 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
   public func reset() {
     previousOutputs.removeAll(keepingCapacity: true)
     currentPlan = nil
+    stepIndex = 0
   }
 
   // MARK: - DPM-Solver++ Steps
