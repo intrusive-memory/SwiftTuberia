@@ -2,11 +2,25 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.3.2
+**Version**: 0.3.6
 
 ---
 
 ## Recent Changes
+
+### v0.3.6
+- **DiffusionPipeline**: Cast backbone output to float32 before scheduler math — prevents float16 rounding error amplification (~157×) at high-noise timesteps, fixing channel-specific bias accumulation in PixArt fixtures.
+- **WeightLoader**: Move MACF bypass before empty-safetensors guard — ensures the bypass fires before any early-exit check.
+- **BetaSchedule**: Add `scaledLinear` schedule variant; T5 int4 dequantization support.
+
+### v0.3.5
+- **WeightLoader**: Removed `canEnumerateDirectory` guard from MACF bypass — `fopen()` is blocked by MACF even when directory enumeration succeeds, so the bypass now fires unconditionally for App Group Container paths.
+
+### v0.3.4
+- **WeightLoader/T5XXLEncoder**: Require explicit `VINETAS_TEST_MODELS_DIR` for integration tests — tests skip cleanly rather than failing when the env var is absent.
+
+### v0.3.3
+- **T5XXLEncoder**: MACF-aware tokenizer directory redirect — resolves tokenizer path through App Group Container when direct access is blocked by Managed App Configuration Framework.
 
 ### v0.3.2
 - **WeightLoader bug fix**: Hardlink bypass for App Group Container now only activates when the process cannot actually enumerate the directory (`canEnumerateDirectory` check). Prevents stale `/tmp` hardlinks from shadowing real model files in the entitled Vinetas app. Root cause: SwiftAcervo 0.5.6's `withModelAccess()` fallback correctly resolved short component IDs (e.g. `"t5-xxl-encoder-int4"`) to their App Group Container path, exposing the over-broad bypass condition.

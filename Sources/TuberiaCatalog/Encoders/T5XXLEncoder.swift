@@ -400,8 +400,10 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
         let biases = biasesMap[mappedKey]
       {
         // Dequantize: [outDim, inDim/8] → [outDim, inDim] in float16
-        let floatWeight = dequantized(tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
-          .asType(.float16)
+        let floatWeight = dequantized(
+          tensor, scales: scales, biases: biases, groupSize: 64, bits: 4
+        )
+        .asType(.float16)
         // Transpose to [inDim, outDim] for direct matmul(x, w) in T5 layers.
         tensorToStore = floatWeight.transposed(1, 0)
       } else if mappedKey == "relative_position_bias" {

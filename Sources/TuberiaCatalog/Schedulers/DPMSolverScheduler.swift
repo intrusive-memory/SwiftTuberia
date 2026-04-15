@@ -206,11 +206,11 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
   /// - `alpha_s1  = sqrt(alphaCumprod[t_previous])`
   /// - `sigma_s1  = sqrt(1 - alphaCumprod[t_previous])`
   private func dpmSolverSecondOrderStep(
-    predictedOriginal: MLXArray,   // m0: current denoised prediction (x0 at s0)
-    previousPredicted: MLXArray,   // m1: previous denoised prediction (x0 at s1)
-    timestep: Int,                 // s0: current timestep
-    previousTimestep: Int,         // s1: previous timestep (one step further back)
-    sample: MLXArray               // x_{s0}: current noisy sample
+    predictedOriginal: MLXArray,  // m0: current denoised prediction (x0 at s0)
+    previousPredicted: MLXArray,  // m1: previous denoised prediction (x0 at s1)
+    timestep: Int,  // s0: current timestep
+    previousTimestep: Int,  // s1: previous timestep (one step further back)
+    sample: MLXArray  // x_{s0}: current noisy sample
   ) -> MLXArray {
     // Target timestep = the one we're stepping TO (next in the denoising direction)
     let targetTimestep = findPreviousTimestep(current: timestep)  // t (lower noise)
@@ -221,22 +221,22 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
     let acS1 = alphaCumprod(at: previousTimestep)
 
     // alpha and sigma in DPM-Solver++ notation (alpha = sqrt(ac), sigma = sqrt(1-ac))
-    let alphaT  = Float(Foundation.sqrt(acT))
-    let sigmaT  = Float(Foundation.sqrt(max(1.0 - acT, 1e-8)))
+    let alphaT = Float(Foundation.sqrt(acT))
+    let sigmaT = Float(Foundation.sqrt(max(1.0 - acT, 1e-8)))
     let alphaS0 = Float(Foundation.sqrt(acS0))
     let sigmaS0 = Float(Foundation.sqrt(max(1.0 - acS0, 1e-8)))
     let alphaS1 = Float(Foundation.sqrt(acS1))
     let sigmaS1 = Float(Foundation.sqrt(max(1.0 - acS1, 1e-8)))
 
     // Log-SNR: lambda = log(alpha) - log(sigma)
-    let lambdaT  = Foundation.log(alphaT)  - Foundation.log(sigmaT)
+    let lambdaT = Foundation.log(alphaT) - Foundation.log(sigmaT)
     let lambdaS0 = Foundation.log(alphaS0) - Foundation.log(sigmaS0)
     let lambdaS1 = Foundation.log(alphaS1) - Foundation.log(sigmaS1)
 
     // Log-SNR differences
-    let h  = lambdaT  - lambdaS0  // h > 0 means moving toward lower noise
+    let h = lambdaT - lambdaS0  // h > 0 means moving toward lower noise
     let h0 = lambdaS0 - lambdaS1  // h0 > 0 (s1 is earlier / higher noise than s0)
-    let r0 = max(h0 / h, 1e-8)    // ratio, guard against zero
+    let r0 = max(h0 / h, 1e-8)  // ratio, guard against zero
 
     // D0 = current prediction, D1 = first-order finite difference
     // D1 = (m0 - m1) / r0
