@@ -10,10 +10,10 @@ Use standard `xcodebuild` commands (no MCP access):
 
 ```bash
 # Build
-xcodebuild build -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+xcodebuild build -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
 
 # Test
-xcodebuild test -scheme SwiftTuberia -destination 'platform=macOS,arch=arm64'
+xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
 
 # Resolve dependencies
 xcodebuild -resolvePackageDependencies

@@ -4,6 +4,10 @@
 
 public enum BetaSchedule: Sendable {
   case linear(betaStart: Float, betaEnd: Float)
+  /// Scaled-linear schedule (HuggingFace `"scaled_linear"`).
+  /// betas = linspace(sqrt(betaStart), sqrt(betaEnd), T)²
+  /// Used by PixArt-Sigma, Stable Diffusion 1.x/2.x, SDXL.
+  case scaledLinear(betaStart: Float, betaEnd: Float)
   case cosine
   case sqrt
 }

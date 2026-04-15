@@ -424,8 +424,13 @@ public actor DiffusionPipeline<
           let condPrediction = try backbone.forward(condInput)
 
           // CFG formula: uncond + scale * (cond - uncond)
+          // Cast to float32 before scheduler math: backbone weights are float16, and at
+          // high-noise timesteps (t≈999, sigma≈157) the DPM-Solver divides by sqrt(alpha_t)≈0.006,
+          // amplifying float16 rounding errors 157×. Float32 prevents channel-specific bias
+          // accumulation over the 20-step trajectory.
           let guidedPrediction =
-            uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction)
+            (uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction)).asType(
+              .float32)
 
           latents = try scheduler.step(
             output: guidedPrediction,
@@ -441,7 +446,8 @@ public actor DiffusionPipeline<
             timestep: timestepArray
           )
 
-          let prediction = try backbone.forward(input)
+          // Cast to float32: see CFG branch comment above.
+          let prediction = try backbone.forward(input).asType(.float32)
 
           latents = try scheduler.step(
             output: prediction,
