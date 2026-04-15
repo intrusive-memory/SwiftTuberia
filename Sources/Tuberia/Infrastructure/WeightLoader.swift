@@ -40,31 +40,20 @@ public struct WeightLoader: Sendable {
       let result = try await AcervoManager.shared.withModelAccess(componentId) {
         directoryURL -> ModuleParameters in
         print("[WeightLoader] withModelAccess directory for '\(componentId)': \(directoryURL.path)")
-        let safetensorsURLs = findSafetensorsFiles(in: directoryURL)
-        print("[WeightLoader] findSafetensorsFiles returned \(safetensorsURLs.count) file(s)")
 
-        guard !safetensorsURLs.isEmpty else {
-          throw PipelineError.weightLoadingFailed(
-            component: componentId,
-            reason: "No .safetensors files found in component directory"
-          )
-        }
-
-        // If in a macOS App Group Container, MACF blocks fopen() for unentitled processes
-        // (e.g. xctest without com.apple.security.application-groups). The guard is:
+        // Resolve effective safetensors URLs, applying the MACF test-models bypass
+        // BEFORE checking for empty results.
         //
-        //   1. The directory is inside a Group Containers path (App Group container).
-        //   2. VINETAS_TEST_MODELS_DIR is explicitly set (only the Makefile GPU/fixture
-        //      test targets set this — unit tests never do, so they stay isolated from
-        //      /tmp hardlinks).
+        // The bypass serves two purposes:
+        //   1. MACF blocks fopen() for unentitled xctest processes. opendir/stat succeed
+        //      but file reads fail. We redirect to pre-hardlinked files in /tmp.
+        //   2. Locally-generated weights (e.g. fp16 DiT from dequantize_dit_to_fp16.py)
+        //      live in VINETAS_TEST_MODELS_DIR but have no counterpart in the App Group
+        //      container. The bypass must fire BEFORE the empty-safetensors guard.
         //
-        // NOTE: We intentionally do NOT check `canEnumerateDirectory` here.
-        // macOS MACF blocks fopen() (file content reads) but still allows opendir/stat,
-        // so `FileManager.enumerator` returns results even when `fopen()` would fail.
-        // Using !canEnumerateDirectory as the bypass signal is wrong — it would prevent
-        // the bypass from firing on machines where the directory CAN be enumerated but
-        // fopen() is still blocked by MACF (which is the common case on developer Macs).
-        // The VINETAS_TEST_MODELS_DIR guard is sufficient: only GPU test targets set it.
+        // Guard conditions:
+        //   1. The resolved directory is inside a Group Containers path (App Group).
+        //   2. VINETAS_TEST_MODELS_DIR is set (only GPU/fixture Makefile targets set this).
         let effectiveURLs: [URL]
         if directoryURL.path.contains("/Group Containers/"),
           let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
@@ -72,14 +61,24 @@ public struct WeightLoader: Sendable {
           let tempDir = URL(fileURLWithPath: baseDir).appendingPathComponent(componentId)
           let tempURLs = findSafetensorsFiles(in: tempDir)
           if !tempURLs.isEmpty {
-            print("[WeightLoader] Using pre-hardlinked files from \(tempDir.path)")
+            print("[WeightLoader] Using test-models-dir files from \(tempDir.path)")
             effectiveURLs = tempURLs
           } else {
-            print("[WeightLoader] No pre-hardlinked files in \(tempDir.path), using original")
-            effectiveURLs = safetensorsURLs
+            // No files in test dir — fall back to App Group (covers the entitled-app path)
+            print("[WeightLoader] No files in \(tempDir.path), falling back to App Group dir")
+            effectiveURLs = findSafetensorsFiles(in: directoryURL)
           }
         } else {
-          effectiveURLs = safetensorsURLs
+          effectiveURLs = findSafetensorsFiles(in: directoryURL)
+        }
+
+        print("[WeightLoader] effective safetensors count: \(effectiveURLs.count)")
+
+        guard !effectiveURLs.isEmpty else {
+          throw PipelineError.weightLoadingFailed(
+            component: componentId,
+            reason: "No .safetensors files found in component directory"
+          )
         }
 
         var allParameters: [String: MLXArray] = [:]
