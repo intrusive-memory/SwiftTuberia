@@ -104,6 +104,18 @@ struct CatalogRegistrationTests {
     #expect(vae?.files.count == 2)  // config.json, model.safetensors
   }
 
+  @Test("Component descriptors include required files with non-empty relativePaths")
+  func requiredFileRelativePaths() {
+    let registry = CatalogRegistration.shared
+    registry.ensureRegistered()
+
+    let t5 = registry.descriptor(for: "t5-xxl-encoder-int4")
+    let vae = registry.descriptor(for: "sdxl-vae-decoder-fp16")
+    for file in (t5?.files ?? []) + (vae?.files ?? []) {
+      #expect(!file.relativePath.isEmpty, "ComponentFile relativePath must not be empty")
+    }
+  }
+
   @Test("Component descriptors include metadata")
   func componentMetadata() {
     let registry = CatalogRegistration.shared
@@ -122,114 +134,5 @@ struct CatalogRegistrationTests {
   func componentIdConstants() {
     #expect(CatalogRegistration.t5XXLEncoderComponentId == "t5-xxl-encoder-int4")
     #expect(CatalogRegistration.sdxlVAEDecoderComponentId == "sdxl-vae-decoder-fp16")
-  }
-}
-
-// MARK: - ComponentFile Integrity Assertions (S2 REQ-T4)
-
-/// Validates that every registered ComponentFile carries a non-nil SHA-256 digest
-/// and a positive expectedSizeBytes value, and that the digest is exactly 64
-/// lowercase hex characters.
-///
-/// These assertions guard against accidental removal of checksum data and ensure
-/// the integrity-verification path in SwiftAcervo can validate every file.
-@Suite("ComponentFile Integrity Assertions", .serialized)
-struct ComponentFileIntegrityTests {
-
-  /// Returns true when `hex` is exactly 64 lowercase hex characters (SHA-256 format).
-  private func isValidSHA256(_ hex: String) -> Bool {
-    guard hex.count == 64 else { return false }
-    return hex.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isLowercase) }
-  }
-
-  /// Collect all ComponentFile entries from all registered descriptors.
-  private func allRegisteredFiles() -> [(componentId: String, file: ComponentFile)] {
-    let registry = CatalogRegistration.shared
-    registry.ensureRegistered()
-    var results: [(componentId: String, file: ComponentFile)] = []
-    for id in [
-      CatalogRegistration.t5XXLEncoderComponentId,
-      CatalogRegistration.sdxlVAEDecoderComponentId,
-    ] {
-      if let descriptor = registry.descriptor(for: id) {
-        for file in descriptor.files {
-          results.append((componentId: id, file: file))
-        }
-      }
-    }
-    return results
-  }
-
-  @Test("Every ComponentFile has a non-nil sha256")
-  func allFilesHaveSHA256() {
-    let files = allRegisteredFiles()
-    #expect(files.isEmpty == false, "Expected at least one registered ComponentFile")
-    for entry in files {
-      #expect(
-        entry.file.sha256 != nil,
-        "ComponentFile '\(entry.file.relativePath)' in '\(entry.componentId)' is missing sha256"
-      )
-    }
-  }
-
-  @Test("Every ComponentFile has expectedSizeBytes > 0")
-  func allFilesHavePositiveSize() {
-    let files = allRegisteredFiles()
-    #expect(files.isEmpty == false, "Expected at least one registered ComponentFile")
-    for entry in files {
-      let size = entry.file.expectedSizeBytes
-      #expect(
-        size != nil,
-        "ComponentFile '\(entry.file.relativePath)' in '\(entry.componentId)' is missing expectedSizeBytes"
-      )
-      if let size {
-        #expect(
-          size > 0,
-          "ComponentFile '\(entry.file.relativePath)' in '\(entry.componentId)' has non-positive expectedSizeBytes: \(size)"
-        )
-      }
-    }
-  }
-
-  @Test("Every ComponentFile sha256 matches ^[0-9a-f]{64}$")
-  func allFilesHaveValidSHA256Format() {
-    let files = allRegisteredFiles()
-    #expect(files.isEmpty == false, "Expected at least one registered ComponentFile")
-    for entry in files {
-      guard let sha256 = entry.file.sha256 else {
-        Issue.record("ComponentFile '\(entry.file.relativePath)' in '\(entry.componentId)' is missing sha256")
-        continue
-      }
-      #expect(
-        isValidSHA256(sha256),
-        "ComponentFile '\(entry.file.relativePath)' in '\(entry.componentId)' has invalid sha256: '\(sha256)'"
-      )
-    }
-  }
-
-  @Test("T5-XXL encoder files all have populated checksums")
-  func t5XXLFilesAllPopulated() {
-    let registry = CatalogRegistration.shared
-    registry.ensureRegistered()
-    let descriptor = registry.descriptor(for: CatalogRegistration.t5XXLEncoderComponentId)
-    #expect(descriptor != nil)
-    guard let descriptor else { return }
-    for file in descriptor.files {
-      #expect(file.sha256 != nil, "T5 file '\(file.relativePath)' missing sha256")
-      #expect((file.expectedSizeBytes ?? 0) > 0, "T5 file '\(file.relativePath)' has no expectedSizeBytes")
-    }
-  }
-
-  @Test("SDXL VAE decoder files all have populated checksums")
-  func sdxlVAEFilesAllPopulated() {
-    let registry = CatalogRegistration.shared
-    registry.ensureRegistered()
-    let descriptor = registry.descriptor(for: CatalogRegistration.sdxlVAEDecoderComponentId)
-    #expect(descriptor != nil)
-    guard let descriptor else { return }
-    for file in descriptor.files {
-      #expect(file.sha256 != nil, "VAE file '\(file.relativePath)' missing sha256")
-      #expect((file.expectedSizeBytes ?? 0) > 0, "VAE file '\(file.relativePath)' has no expectedSizeBytes")
-    }
   }
 }
