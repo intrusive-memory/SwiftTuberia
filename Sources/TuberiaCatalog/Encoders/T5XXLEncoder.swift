@@ -53,52 +53,31 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   ///
   /// The tokenizer files (`tokenizer.json`, `tokenizer_config.json`) are bundled
   /// in the same Acervo component as the weights (component ID configured via
-  /// `configuration.componentId`).
+  /// `configuration.componentId`). Uses SwiftAcervo v2 `withComponentAccess` API
+  /// to ensure integrity verification and abstract storage location.
   public func loadTokenizer() async {
     do {
-      // Step 1: Obtain the model directory URL via Acervo.
-      let acervoDir = try await AcervoManager.shared.withModelAccess(configuration.componentId) {
-        directoryURL -> URL in
-        directoryURL
+      // Step 1: Access the component via SwiftAcervo v2 API to resolve tokenizer location.
+      // The ComponentHandle abstracts the storage location and applies integrity checks.
+      let tokenizerDir = try await AcervoManager.shared.withComponentAccess(
+        configuration.componentId
+      ) { handle -> URL in
+        // Step 2: Resolve the tokenizer.json file via the component handle.
+        // This ensures we only access files declared in the ComponentDescriptor.
+        let tokenizerURL = try handle.url(matching: "tokenizer.json")
+        print("[T5XXLEncoder] Located tokenizer at: \(tokenizerURL.path)")
+
+        // Return the directory containing the tokenizer (needed by AutoTokenizer.from)
+        return tokenizerURL.deletingLastPathComponent()
       }
 
-      // Step 2: Apply the same MACF-aware redirect as WeightLoader.
-      //
-      // On macOS, MACF (Mandatory Access Control Framework) blocks open() on files inside
-      // ~/Library/Group Containers/… for processes that lack the
-      // com.apple.security.application-groups entitlement — including xctest.
-      // AutoTokenizer.from(modelFolder:) reads JSON files via open(), so it fails
-      // silently when acervoDir is an App Group Container path.
-      //
-      // WeightLoader already works around this by using pre-hardlinked files in
-      // /tmp/vinetas-test-models/<componentId>/ (created by `make link-test-models`).
-      // We apply the same check here so the tokenizer uses the same accessible directory.
-      //
-      // The redirect requires VINETAS_TEST_MODELS_DIR to be explicitly set (e.g. via
-      // the Makefile's `test-gpu` target). Unit tests that do NOT set this env var will
-      // not redirect, so they remain isolated from GPU-test hardlinks in /tmp.
-      let effectiveDir: URL
-      if acervoDir.path.contains("/Group Containers/"),
-        let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
-      {
-        let tempDir = URL(fileURLWithPath: baseDir)
-          .appendingPathComponent(configuration.componentId)
-        let tokenizerJSON = tempDir.appendingPathComponent("tokenizer.json")
-        if FileManager.default.fileExists(atPath: tokenizerJSON.path) {
-          effectiveDir = tempDir
-        } else {
-          effectiveDir = acervoDir
-        }
-      } else {
-        effectiveDir = acervoDir
-      }
-
-      // Step 3: Load the tokenizer from the resolved directory.
-      let tok = try await AutoTokenizer.from(modelFolder: effectiveDir)
-      self.tokenizer = tok
+      // Step 3: Load the tokenizer asynchronously using swift-transformers' AutoTokenizer.
+      let loadedTokenizer = try await AutoTokenizer.from(modelFolder: tokenizerDir)
+      self.tokenizer = loadedTokenizer
     } catch {
       // Non-fatal: encode() falls back to placeholder tokenization when tokenizer is nil.
       // Errors here are expected in testing environments without real model files.
+      print("[T5XXLEncoder] Warning: Failed to load tokenizer: \(error)")
     }
   }
 

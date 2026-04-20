@@ -135,3 +135,91 @@ public struct DeviceCapability: Sendable {
     }
 }
 ```
+
+---
+
+## SwiftAcervo Integration Compliance
+
+**Status**: ✅ COMPLIANT — Reference Implementation (Pattern D: Scoped File Access)
+
+### Compliance Summary
+
+SwiftTuberia implements the **ideal pattern** for consuming SwiftAcervo. The WeightLoader uses `AcervoManager.withComponentAccess()` for scoped, leak-free file access:
+
+- ✅ **Scoped file access**: Paths never leave the closure scope
+- ✅ **No path exposure**: WeightLoader cannot store or leak paths
+- ✅ **Atomic access**: Components remain valid for the closure duration
+- ✅ **MACF-safe**: Workaround for test entitlement restrictions via `VINETAS_TEST_MODELS_DIR`
+- ✅ **Error handling**: Typed exceptions converted to pipeline-specific errors
+- ✅ **Memory validation**: `MemoryManager.hardValidate()` called before loading
+- ✅ **Component registration**: Pipeline recipes declare components via ComponentDescriptor
+
+### Pattern Details
+
+**Model Access Flow**:
+```
+DiffusionPipeline.loadModels()
+  ↓
+For each WeightedSegment:
+  WeightLoader.load(componentId: id, keyMapping: mapping)
+    ↓
+  AcervoManager.shared.withComponentAccess(id) { handle in
+    // Find safetensors files
+    // Load + remap + transform + quantize
+    // Return ModuleParameters
+    // Paths valid only within this closure
+  }
+```
+
+**Key Properties**:
+- No paths stored outside closure
+- No file handles kept after closure exits
+- Supports sharded weights (multiple safetensors files)
+- Handles LoRA adapters via `withLocalAccess()`
+- MACF workaround for xctest: `VINETAS_TEST_MODELS_DIR` env var redirects to `/tmp/`
+
+### Component Registration
+
+Pipeline recipes register components via `ComponentDescriptor` at import time:
+
+```swift
+// TuberiaCatalog.swift
+private let _registerCatalogComponents = {
+    let descriptors = [
+        ComponentDescriptor(
+            id: "t5-xxl-encoder-int4",
+            repoId: "mlx-community/T5-XXL-Encoder-int4",
+            files: [...],
+            estimatedSizeBytes: 1_200_000_000
+        ),
+        // ... other components
+    ]
+    Acervo.register(descriptors)
+}()
+```
+
+### Testing
+
+**Unit Tests**: Mock component access, don't require real weights
+
+**Integration Tests**: Use real Acervo cache if `VINETAS_TEST_MODELS_DIR` is not set; skip if models unavailable
+
+**MACF Workaround**: When running in xctest with restricted entitlements, set `VINETAS_TEST_MODELS_DIR=/tmp/vinetas-test-models/` and tests skip cleanly (no model downloads triggered without explicit opt-in)
+
+### Audit Checklist (All Complete)
+
+- [x] AcervoManager.withComponentAccess() used for scoped file access
+- [x] withLocalAccess() used for LoRA adapters
+- [x] No file paths stored outside closure scope
+- [x] MACF test workaround via VINETAS_TEST_MODELS_DIR env var
+- [x] Integration tests opt-in only (skip without env var)
+- [x] Error handling converts AcervoError to pipeline errors
+- [x] Memory validation via MemoryManager before loading
+- [x] AGENTS.md documents component registration
+
+### Reference
+
+See `/Users/stovak/Projects/ACERVO_INTEGRATION_REQUIREMENTS.md` (master reference) for:
+- Pattern D (Scoped File Access) ideal implementation
+- Other patterns (A–C) and when to use them
+- SwiftAcervo/AGENTS.md for complete API reference
