@@ -8,6 +8,10 @@ This file provides comprehensive documentation for AI agents working with the Sw
 
 ## Recent Changes
 
+### v0.3.9 — Delegate File Integrity to SwiftAcervo CDN Manifest (Correction)
+
+Tuberia no longer stores per-file SHA-256 checksums or `expectedSizeBytes` values in `CatalogRegistration.swift`; SwiftAcervo's CDN manifest download and per-file verification path is the single source of truth for all 11 `ComponentFile` entries (REQ-T4). The `VerifyComponentManifest` SwiftPM executable tool and its corresponding "Verify manifest matches source" CI step have been removed from `Package.swift` and `.github/workflows/ensure-model-cdn.yml` respectively; SwiftAcervo's built-in integrity mechanism (`AcervoError.integrityCheckFailed`, `manifestIntegrityFailed`) is authoritative and needs no caller-side double (REQ-CDN-01). This supersedes the v0.3.8 language for REQ-T4 and REQ-CDN-01 — both were architecturally mis-implemented by S2 (`dc88d6d`) and S7 (`f4e6939`).
+
 ### v0.3.8 — SwiftAcervo v2 Integration Complete (OPERATION RIVETED PIPEWORK)
 
 - **SwiftAcervo floor bumped to 0.7.2** (REQ-T5, S1 `0aa8fcf`) — `Package.swift` now declares `from: "0.7.2"`, ensuring fresh resolutions never regress to v1 symbols. Resolves the gap between `Package.resolved` pin and declared floor.

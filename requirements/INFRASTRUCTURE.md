@@ -179,9 +179,10 @@ Original T1–T5 audit: `AUDIT_FINDINGS.md`.
 All items below were outstanding at audit time (2026-04-20). Each has been satisfied by
 OPERATION RIVETED PIPEWORK sorties S1–S7. See `REQUIREMENTS.md` rows 6–12 for evidence.
 
-- ✅ **SHA-256 checksums** — all 11 `ComponentFile` entries in `CatalogRegistration.swift`
-  now carry `sha256:` and `expectedSizeBytes:`. Count: 5 T5-XXL shards + 4 T5-XXL metadata
-  + 2 SDXL VAE = 11 (plan originally assumed 6; T5 is sharded). (REQ-T4, S2 `dc88d6d`)
+- ✅ **SHA-256 checksums** (REQ-T4, corrected S9) — Tuberia registers opaque file lists;
+  Acervo v2 verifies via CDN manifest. No caller-side sha256 in `CatalogRegistration.swift`.
+  All 11 `ComponentFile` entries carry `sha256: nil` / `expectedSizeBytes: nil`.
+  Count: 5 T5-XXL shards + 4 T5-XXL metadata + 2 SDXL VAE = 11.
 - ✅ **`Acervo.ensureComponentReady` in load path** — `DiffusionPipeline.loadModels`
   calls `componentReadinessService.ensureComponentReady(componentId)` per segment before
   `WeightLoader.load`. First-run cache misses auto-download. (REQ-PIPE-01, S3 `de8212c`)
@@ -314,9 +315,9 @@ also triggers the `let` initializer on first use.
       `PipelineError.weightLoadingFailed`. (`WeightLoader.swift:95-109`)
 - [x] AGENTS.md documents component registration (section "Project Overview" + v0.3.0
       changelog entry; v0.3.8 entry adds full OPERATION RIVETED PIPEWORK summary).
-- [x] **SHA-256 checksums** populated on every `ComponentFile` (REQ-T4, S2 `dc88d6d`).
-      All 11 entries in `CatalogRegistration.swift` carry `sha256:` and `expectedSizeBytes:`.
-      Count is 11, not 6: 5 T5-XXL safetensors shards + 4 T5-XXL metadata + 2 SDXL VAE.
+- [x] **SHA-256 checksums** (REQ-T4, corrected S9) — Tuberia registers opaque file lists;
+      Acervo v2 verifies via CDN manifest. No caller-side sha256 in `CatalogRegistration.swift`.
+      All 11 `ComponentFile` entries carry `sha256: nil` and `expectedSizeBytes: nil`.
 - [x] **`Acervo.ensureComponentReady`** invoked before `WeightLoader.load`
       (REQ-PIPE-01, S3 `de8212c`). `DiffusionPipeline.loadModels` calls
       `componentReadinessService.ensureComponentReady(componentId)` per segment at line 268.
@@ -334,6 +335,10 @@ also triggers the `let` initializer on first use.
       not-downloaded, LoRA local-access (REQ-INT-01, S6 `bf761d0`).
       `Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift` and
       `ComponentIntegrityTests.swift` both present.
+- [x] **CDN manifest integrity** (REQ-CDN-01, corrected S9) — SwiftAcervo v2 manifest-download
+      + integrity-check path is authoritative; no separate Tuberia verifier.
+      `VerifyComponentManifest` tool and CI step removed; `ensure-model-cdn.yml` verifies
+      manifest reachability only.
 - [x] MACF workaround doc updated to reflect the current stat-based probe (done in
       this document in the "MACF / Sandboxed Enumeration Behavior" section above).
       `VINETAS_TEST_MODELS_DIR` is absent from `Sources/`; the v0.3.4 AGENTS.md entry
