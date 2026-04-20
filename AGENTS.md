@@ -97,10 +97,14 @@ Documentation:
 
 ```bash
 xcodebuild build -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
-xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'
+xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO
 ```
 
 Available schemes: `SwiftTuberia-Package`, `Tuberia`, `TuberiaCatalog`. Run `xcodebuild -list` to confirm. **Never use `-scheme SwiftTuberia`** — that scheme does not exist.
+
+### Always disable parallel test execution
+
+`xcodebuild test` must be invoked with `-parallel-testing-enabled NO`. MLX owns a process-global Metal GPU stream, and Swift Testing's default cross-suite parallelism races on the shared command buffer, producing `-[_MTLCommandBuffer addCompletedHandler:] 'Completed handler provided after commit call'` and aborting the process. Suite-level `.serialized` traits only serialize tests within a suite — they do not prevent sibling suites from running concurrently. `make test` and the CI workflow already apply this flag; any ad-hoc `xcodebuild test` invocation must set it too.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
 See [GENERATION_PATHS.md](GENERATION_PATHS.md) for generation path analysis.
