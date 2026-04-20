@@ -1,0 +1,87 @@
+name: Ensure Model on CDN (Midnight)
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Midnight UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ensure-model-cdn
+  cancel-in-progress: false
+
+jobs:
+  ensure-model-cdn:
+    name: Upload ${{ matrix.model.id }} to CDN
+    runs-on: macos-26
+    timeout-minutes: 240
+
+    strategy:
+      matrix:
+        model:
+          - id: t5-xxl-encoder-int4
+            repo: intrusive-memory/t5-xxl-int4-mlx
+            slug: intrusive-memory_t5-xxl-int4-mlx
+          - id: sdxl-vae-decoder-fp16
+            repo: intrusive-memory/sdxl-vae-fp16-mlx
+            slug: intrusive-memory_sdxl-vae-fp16-mlx
+
+    env:
+      MODEL_ID: ${{ matrix.model.id }}
+      MODEL_REPO: ${{ matrix.model.repo }}
+      MODEL_SLUG: ${{ matrix.model.slug }}
+      CDN_BASE: ${{ secrets.CDN_BASE_URL }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install acervo
+        run: |
+          brew tap intrusive-memory/acervo https://github.com/intrusive-memory/homebrew-acervo.git
+          brew install acervo
+
+      - name: Check if manifest exists on CDN (idempotency)
+        run: |
+          MANIFEST_URL="${{ env.CDN_BASE }}/${{ env.MODEL_SLUG }}/manifest.json"
+          if curl -sf "$MANIFEST_URL" > /dev/null 2>&1; then
+            echo "✅ Model ${{ env.MODEL_ID }} already on CDN"
+            exit 0
+          fi
+          echo "⭕ Model ${{ env.MODEL_ID }} not found on CDN, proceeding with upload"
+
+      - name: Download model from HuggingFace
+        run: |
+          mkdir -p /tmp/models/${{ env.MODEL_SLUG }}
+          acervo download \
+            --repo "${{ env.MODEL_REPO }}" \
+            --output "/tmp/models/${{ env.MODEL_SLUG }}"
+
+      - name: Compute SHA-256 manifest
+        run: |
+          cd /tmp/models/${{ env.MODEL_SLUG }}
+          acervo manifest create \
+            --output manifest.json
+
+      - name: Upload to CDN with manifest
+        run: |
+          acervo upload \
+            --bucket "${{ env.R2_BUCKET }}" \
+            --account-id "${{ env.R2_ACCOUNT_ID }}" \
+            --access-key "${{ env.R2_ACCESS_KEY_ID }}" \
+            --secret-key "${{ env.R2_SECRET_ACCESS_KEY }}" \
+            --source "/tmp/models/${{ env.MODEL_SLUG }}" \
+            --destination "${{ env.MODEL_SLUG }}"
+
+      - name: Verify upload
+        run: |
+          MANIFEST_URL="${{ env.CDN_BASE }}/${{ env.MODEL_SLUG }}/manifest.json"
+          if curl -sf "$MANIFEST_URL" > /dev/null; then
+            echo "✅ Model ${{ env.MODEL_ID }} successfully uploaded to CDN"
+          else
+            echo "❌ Failed to verify upload"
+            exit 1
+          fi
