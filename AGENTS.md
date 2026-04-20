@@ -2,11 +2,22 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.3.6
+**Version**: 0.4.0
 
 ---
 
 ## Recent Changes
+
+### v0.4.0 — OPERATION RIVETED PIPEWORK release + dependency floor bumps
+
+Bundles v0.3.7/v0.3.8/v0.3.9 work (none of which shipped independently) plus an MLX test parallelism fix into a single minor release. `Package.swift` dependency floors tightened:
+- `mlx-swift`: `from: "0.30.2"` → `.upToNextMajor(from: "0.31.3")`
+- `SwiftAcervo`: `from: "0.7.2"` → `.upToNextMajor(from: "0.7.2")`
+- `swift-transformers`: `from: "1.1.6"` → `.upToNextMajor(from: "1.3.0")`
+
+**MLX test parallelism (`86b2b2d`)** — `make test` and `.github/workflows/tests.yml` now pass `-parallel-testing-enabled NO`. MLX owns a process-global Metal GPU command stream; Swift Testing's default cross-suite parallelism races on the shared command buffer, tripping `-[_MTLCommandBuffer addCompletedHandler:] 'Completed handler provided after commit call'` and aborting with SIGABRT. Suite-level `.serialized` traits only serialize within a suite, not across sibling suites. Any ad-hoc `xcodebuild test` invocation must set the flag too.
+
+See v0.3.9, v0.3.8, and v0.3.7 entries below for the pipeline-integrity work rolled into this release.
 
 ### v0.3.9 — Delegate File Integrity to SwiftAcervo CDN Manifest (Correction)
 

@@ -9,7 +9,10 @@ import Testing
 // MARK: - Minimal Mocks (MemoryGuardTests-local)
 
 private final class MemGuardEncoder: TextEncoder, @unchecked Sendable {
-  struct Config: Sendable { let dim: Int; let seqLen: Int }
+  struct Config: Sendable {
+    let dim: Int
+    let seqLen: Int
+  }
   typealias Configuration = Config
   private(set) var isLoaded = false
   private var weights: ModuleParameters?
@@ -26,12 +29,21 @@ private final class MemGuardEncoder: TextEncoder, @unchecked Sendable {
       mask: MLXArray.ones([1, input.maxLength])
     )
   }
-  func apply(weights: ModuleParameters) throws { self.weights = weights; isLoaded = true }
-  func unload() { weights = nil; isLoaded = false }
+  func apply(weights: ModuleParameters) throws {
+    self.weights = weights
+    isLoaded = true
+  }
+  func unload() {
+    weights = nil
+    isLoaded = false
+  }
 }
 
 private final class MemGuardBackbone: Backbone, @unchecked Sendable {
-  struct Config: Sendable { let dim: Int; let seqLen: Int }
+  struct Config: Sendable {
+    let dim: Int
+    let seqLen: Int
+  }
   typealias Configuration = Config
   private(set) var isLoaded = false
   private var weights: ModuleParameters?
@@ -44,8 +56,14 @@ private final class MemGuardBackbone: Backbone, @unchecked Sendable {
   private let configuration: Config
   required init(configuration: Config) throws { self.configuration = configuration }
   func forward(_ input: BackboneInput) throws -> MLXArray { MLXArray.ones(input.latents.shape) }
-  func apply(weights: ModuleParameters) throws { self.weights = weights; isLoaded = true }
-  func unload() { weights = nil; isLoaded = false }
+  func apply(weights: ModuleParameters) throws {
+    self.weights = weights
+    isLoaded = true
+  }
+  func unload() {
+    weights = nil
+    isLoaded = false
+  }
 }
 
 private final class MemGuardDecoder: Decoder, @unchecked Sendable {
@@ -61,15 +79,22 @@ private final class MemGuardDecoder: Decoder, @unchecked Sendable {
   required init(configuration: Config) throws {}
   func decode(_ latents: MLXArray) throws -> DecodedOutput {
     let shape = latents.shape
-    let b = shape[0]; let h = shape.count > 1 ? shape[1] * 8 : 8
+    let b = shape[0]
+    let h = shape.count > 1 ? shape[1] * 8 : 8
     let w = shape.count > 2 ? shape[2] * 8 : 8
     return DecodedOutput(
       data: MLXArray.ones([b, h, w, 3]) * 0.5,
       metadata: ImageDecoderMetadata(scalingFactor: scalingFactor)
     )
   }
-  func apply(weights: ModuleParameters) throws { self.weights = weights; isLoaded = true }
-  func unload() { weights = nil; isLoaded = false }
+  func apply(weights: ModuleParameters) throws {
+    self.weights = weights
+    isLoaded = true
+  }
+  func unload() {
+    weights = nil
+    isLoaded = false
+  }
 }
 
 private final class MemGuardScheduler: Scheduler, @unchecked Sendable {

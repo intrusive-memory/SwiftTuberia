@@ -12,8 +12,8 @@
 
 import Foundation
 @preconcurrency import MLX
-import Testing
 import SwiftAcervo
+import Testing
 import Tuberia
 
 @testable import TuberiaCatalog

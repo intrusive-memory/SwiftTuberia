@@ -49,12 +49,12 @@ public protocol PipelineRecipe: Sendable {
 
 // MARK: - Default implementations
 
-public extension PipelineRecipe {
+extension PipelineRecipe {
   /// Derives the role-to-ID map from `allComponentIds` by zipping with `PipelineRole.allCases`.
   ///
   /// Roles without a corresponding entry in `allComponentIds` are omitted from the map
   /// (i.e. their lookup returns `nil` in `findComponentId(for:)`).
-  var componentIdFor: [PipelineRole: String] {
+  public var componentIdFor: [PipelineRole: String] {
     var map: [PipelineRole: String] = [:]
     for (role, id) in zip(PipelineRole.allCases, allComponentIds) {
       map[role] = id

@@ -16,11 +16,16 @@ private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
   ComponentFile(relativePath: "tokenizer.json", expectedSizeBytes: nil, sha256: nil),
   ComponentFile(relativePath: "tokenizer_config.json", expectedSizeBytes: nil, sha256: nil),
   ComponentFile(relativePath: "special_tokens_map.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model-00000-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model-00001-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model-00002-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model-00003-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model-00004-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00000-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00001-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00002-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00003-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00004-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
 ]
 
 /// SDXL VAE Decoder (fp16) required files.
@@ -52,7 +57,7 @@ private let t5XXLEncoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
     "component_role": "text_encoder",
     "quantization": "int4",
     "output_dim": "4096",
-    "max_sequence_length": "512"
+    "max_sequence_length": "512",
   ]
 )
 
@@ -71,7 +76,7 @@ private let sdxlVAEDecoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
   metadata: [
     "component_role": "decoder",
     "quantization": "fp16",
-    "latent_channels": "4"
+    "latent_channels": "4",
   ]
 )
 
@@ -82,7 +87,7 @@ private let sdxlVAEDecoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
 private let _registerTuberiaCatalogComponents: Void = {
   Acervo.register([
     t5XXLEncoderComponentDescriptor,
-    sdxlVAEDecoderComponentDescriptor
+    sdxlVAEDecoderComponentDescriptor,
   ])
 }()
 
