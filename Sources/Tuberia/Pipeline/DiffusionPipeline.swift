@@ -33,7 +33,9 @@ public actor DiffusionPipeline<
 
   private let _supportsImageToImage: Bool
   private let _unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy
-  private let _allComponentIds: [String]
+  /// Role-keyed component ID map, populated from `recipe.componentIdFor` at init time (REQ-PIPE-03).
+  /// Eliminates the positional array indexing that was used in the original implementation.
+  private let _componentIdByRole: [PipelineRole: String]
   private let _encoderQuantization: QuantizationConfig
   private let _backboneQuantization: QuantizationConfig
   private let _decoderQuantization: QuantizationConfig
@@ -70,7 +72,7 @@ public actor DiffusionPipeline<
     // Store recipe metadata
     self._supportsImageToImage = recipe.supportsImageToImage
     self._unconditionalEmbeddingStrategy = recipe.unconditionalEmbeddingStrategy
-    self._allComponentIds = recipe.allComponentIds
+    self._componentIdByRole = recipe.componentIdFor
     self._encoderQuantization = recipe.quantizationFor(.encoder)
     self._backboneQuantization = recipe.quantizationFor(.backbone)
     self._decoderQuantization = recipe.quantizationFor(.decoder)
@@ -259,7 +261,7 @@ public actor DiffusionPipeline<
     backbone.unload()
     decoder.unload()
 
-    for componentId in _allComponentIds {
+    for componentId in _componentIdByRole.values {
       await MemoryManager.shared.unregisterLoaded(component: componentId)
     }
 
@@ -547,23 +549,12 @@ public actor DiffusionPipeline<
 
   // MARK: - Private Helpers
 
-  /// Find the component ID for a given pipeline role from the stored component IDs.
-  /// This is a simplified lookup -- in practice, the recipe maps roles to component IDs.
+  /// Find the component ID for a given pipeline role using the role-keyed dictionary.
+  ///
+  /// Dictionary lookup eliminates positional index coupling (REQ-PIPE-03). Any role
+  /// absent from the map returns `nil`, which skips weight loading for that segment.
   private func findComponentId(for role: PipelineRole) -> String? {
-    // Component IDs are stored as a flat array. The recipe knows the mapping.
-    // For a generalized approach, we rely on the order: encoder, backbone, decoder
-    // (matching the weighted segments order). If there are more IDs than segments,
-    // the extras are for scheduler/renderer which have no weights.
-    switch role {
-    case .encoder:
-      return _allComponentIds.count > 0 ? _allComponentIds[0] : nil
-    case .backbone:
-      return _allComponentIds.count > 1 ? _allComponentIds[1] : nil
-    case .decoder:
-      return _allComponentIds.count > 2 ? _allComponentIds[2] : nil
-    case .scheduler, .renderer:
-      return nil
-    }
+    _componentIdByRole[role]
   }
 
   /// Convert a CGImage to an MLXArray with shape [1, height, width, 3] in [0, 1] range.
