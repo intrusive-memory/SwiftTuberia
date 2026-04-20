@@ -7,20 +7,56 @@ import Tuberia
 /// T5-XXL Encoder (int4 quantized) required files.
 ///
 /// The model is hosted on HuggingFace at `intrusive-memory/t5-xxl-int4-mlx`.
-/// All safetensors files, configuration, and tokenizer files are required for
+/// All safetensors shards, configuration, and tokenizer files are required for
 /// both weight loading and tokenization.
+///
+/// SHA-256 digests and sizes verified from local SharedModels group container
+/// on 2026-04-20 (S2 REQ-T4). The model uses 5 sharded safetensors shards.
 private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
   ComponentFile(
-    relativePath: "config.json"
+    relativePath: "config.json",
+    expectedSizeBytes: 2150,
+    sha256: "dbb4d38c53a37b5cc2bb67262eb56b776f2d828f88189788ea120b39b189a826"
   ),
   ComponentFile(
-    relativePath: "tokenizer.json"
+    relativePath: "tokenizer.json",
+    expectedSizeBytes: 2_424_235,
+    sha256: "f5dfec163765e18e270537fe896c49f5fad74db1525641d9b255a3008b999596"
   ),
   ComponentFile(
-    relativePath: "tokenizer_config.json"
+    relativePath: "tokenizer_config.json",
+    expectedSizeBytes: 20_848,
+    sha256: "d8e1edceb843032e85dcf4f7736fbb224b4ab0ef3e8c2259e858d07f67df99af"
   ),
   ComponentFile(
-    relativePath: "model.safetensors"
+    relativePath: "special_tokens_map.json",
+    expectedSizeBytes: 2543,
+    sha256: "7a1985a994c41886db38c719d2a3d2f40606663cc19d7c5d6a85d349320e06d2"
+  ),
+  ComponentFile(
+    relativePath: "model-00000-of-00005.safetensors",
+    expectedSizeBytes: 715_258_584,
+    sha256: "6657ed6942a268a7d954029b3cabac5677547a847eead1d86ea9eda9b4d17b68"
+  ),
+  ComponentFile(
+    relativePath: "model-00001-of-00005.safetensors",
+    expectedSizeBytes: 733_612_624,
+    sha256: "628389d52839ddc967558f68999d37a42c8b9b2fc6c6e6858535bc30da837c3e"
+  ),
+  ComponentFile(
+    relativePath: "model-00002-of-00005.safetensors",
+    expectedSizeBytes: 732_555_480,
+    sha256: "8c3e0e32220643ac8a7b1cd4c170455f876055df9c0acd48dd8fb9fc7a9525d7"
+  ),
+  ComponentFile(
+    relativePath: "model-00003-of-00005.safetensors",
+    expectedSizeBytes: 497_732_304,
+    sha256: "1e78f2aebf12dac654f754276f18c3c91fd0d17a416ca6a60c0ff137fb68cfef"
+  ),
+  ComponentFile(
+    relativePath: "model-00004-of-00005.safetensors",
+    expectedSizeBytes: 263_192_672,
+    sha256: "55b3ab4c70040390f2a8eef938e0bd93a6543e2e33e687f5d077f051723963f7"
   ),
 ]
 
@@ -28,12 +64,19 @@ private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
 ///
 /// The model is hosted on HuggingFace at `intrusive-memory/sdxl-vae-fp16-mlx`.
 /// Includes the model weights and configuration for decoding.
+///
+/// SHA-256 digests and sizes verified from local SharedModels group container
+/// on 2026-04-20 (S2 REQ-T4).
 private let sdxlVAEDecoderRequiredFiles: [ComponentFile] = [
   ComponentFile(
-    relativePath: "config.json"
+    relativePath: "config.json",
+    expectedSizeBytes: 1054,
+    sha256: "fa21368160b774bfaf32f7b0999912fcd79269a3fdb14b0a79698d45bd42dcfd"
   ),
   ComponentFile(
-    relativePath: "model.safetensors"
+    relativePath: "model.safetensors",
+    expectedSizeBytes: 167_335_310,
+    sha256: "0e636ee29d502d344094f3c03624b462b7e37efb68c61f1f1d47495ef6a0d2db"
   ),
 ]
 
