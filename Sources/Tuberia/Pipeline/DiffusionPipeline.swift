@@ -53,6 +53,21 @@ public actor DiffusionPipeline<
   /// construction and before `loadModels(progress:)`.
   var componentReadinessService: any ComponentReadinessService = AcervoComponentReadinessService()
 
+  // MARK: - Memory Gate Seam (REQ-PIPE-02)
+
+  /// Closure invoked at the start of `loadModels(progress:)` to validate available memory.
+  ///
+  /// Defaults to `MemoryManager.shared.hardValidate(requiredBytes:)`.
+  /// Tests may replace this by calling `setMemoryGate(_:)` to inject a stub
+  /// that simulates insufficient memory without touching the hardware query.
+  ///
+  /// Strategy: single up-front `hardValidate(peakMemoryBytes)` (REQ-PIPE-02, S4).
+  /// Phased-loading with `softCheck` per phase is deferred to a future sortie —
+  /// real peak-vs-phase divergence has not been observed in production workloads.
+  var memoryGate: @Sendable (UInt64) async throws -> Void = { requiredBytes in
+    try await MemoryManager.shared.hardValidate(requiredBytes: requiredBytes)
+  }
+
   // MARK: - Init
 
   /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
@@ -169,6 +184,14 @@ public actor DiffusionPipeline<
     componentReadinessService = service
   }
 
+  /// Replace the memory gate — used by tests to inject a stub that simulates
+  /// insufficient memory without querying real hardware.
+  ///
+  /// Call this on the actor before invoking `loadModels(progress:)`.
+  public func setMemoryGate(_ gate: @escaping @Sendable (UInt64) async throws -> Void) {
+    memoryGate = gate
+  }
+
   // MARK: - GenerationPipeline Conformance
 
   /// Memory requirements -- computed from static config, safe to access without `await`.
@@ -190,6 +213,23 @@ public actor DiffusionPipeline<
   ///
   /// Progress callback receives (fraction: Double, component: String).
   public func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws {
+    // Memory gate (REQ-PIPE-02, S4): validate available memory before committing to loading.
+    //
+    // Strategy: single up-front hardValidate against peakMemoryBytes.
+    // Phased-loading (softCheck per phase) is deferred — see Open Questions #5 in
+    // EXECUTION_PLAN.md. Any error from hardValidate is a PipelineError.insufficientMemory
+    // and surfaces directly to the caller without wrapping (MemoryManager already throws it).
+    let peak = _memoryRequirement.peakMemoryBytes
+    do {
+      try await memoryGate(peak)
+    } catch let error as PipelineError {
+      // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
+      throw error
+    } catch {
+      // Unexpected error from a custom gate: wrap in insufficientMemory with 0 available.
+      throw PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
+    }
+
     // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
     // This is a non-fatal async step: if tokenizer loading fails, encode() falls
     // back to placeholder tokenization (per INF-2 Option B lifecycle design).
