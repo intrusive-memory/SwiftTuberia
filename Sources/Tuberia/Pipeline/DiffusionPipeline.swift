@@ -42,6 +42,15 @@ public actor DiffusionPipeline<
 
   private let _memoryRequirement: MemoryRequirement
 
+  // MARK: - Component Readiness Seam
+
+  /// Seam for ensuring a component is downloaded before weight loading.
+  ///
+  /// Defaults to the production `AcervoComponentReadinessService`. Tests may replace
+  /// this with a spy by calling `pipeline.setComponentReadinessService(_:)` after
+  /// construction and before `loadModels(progress:)`.
+  var componentReadinessService: any ComponentReadinessService = AcervoComponentReadinessService()
+
   // MARK: - Init
 
   /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
@@ -150,6 +159,14 @@ public actor DiffusionPipeline<
     }
   }
 
+  /// Replace the component readiness service — used by tests to inject a spy.
+  ///
+  /// Call this on the actor before invoking `loadModels(progress:)`. In production
+  /// code the default `AcervoComponentReadinessService` is always used.
+  public func setComponentReadinessService(_ service: any ComponentReadinessService) {
+    componentReadinessService = service
+  }
+
   // MARK: - GenerationPipeline Conformance
 
   /// Memory requirements -- computed from static config, safe to access without `await`.
@@ -170,7 +187,7 @@ public actor DiffusionPipeline<
   /// Phase 2: Load Backbone + Decoder weights for generation.
   ///
   /// Progress callback receives (fraction: Double, component: String).
-  public func loadModels(progress: @Sendable (Double, String) -> Void) async throws {
+  public func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws {
     // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
     // This is a non-fatal async step: if tokenizer loading fails, encode() falls
     // back to placeholder tokenization (per INF-2 Option B lifecycle design).
@@ -196,6 +213,26 @@ public actor DiffusionPipeline<
       progress(loadedCount / totalSegments, componentName)
 
       if let componentId = componentId {
+        // Ensure the component files are present on disk (downloads if missing).
+        //
+        // We fold download progress into the existing (Double, String) tick stream rather
+        // than adding a new PipelineProgress case. Adding a case would widen the public
+        // enum and require every switch exhausted by callers to add a new arm — a
+        // breaking change. Folding keeps the contract stable (S8 has nothing new to
+        // document) and is sufficient: the progress bar stays live during downloads.
+        let capturedCount = loadedCount
+        let capturedTotal = totalSegments
+        let capturedName = componentName
+        try await componentReadinessService.ensureComponentReady(componentId) { downloadProgress in
+          // Map Acervo's per-file fraction into the segment's slot in the overall bar.
+          // Each segment occupies a 1/totalSegments window; download fill fills the
+          // first half of that window, leaving the second half for weight-apply below.
+          let slotStart = capturedCount / capturedTotal
+          let slotWidth = 1.0 / capturedTotal
+          let fraction = slotStart + slotWidth * 0.5 * downloadProgress.overallProgress
+          progress(fraction, capturedName)
+        }
+
         let weights = try await WeightLoader.load(
           componentId: componentId,
           keyMapping: segment.keyMapping,
