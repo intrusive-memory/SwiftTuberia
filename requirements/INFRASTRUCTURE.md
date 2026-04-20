@@ -140,10 +140,9 @@ public struct DeviceCapability: Sendable {
 
 ## SwiftAcervo Integration Compliance
 
-**Status (2026-04-20)**: 🟡 PARTIAL — Scoped v2 access path is in place; integrity
-verification, pre-load download, and memory budgeting are still outstanding. See
-`/Users/stovak/Projects/SwiftTuberia/REQUIREMENTS.md` for the tracked sortie list and
-`AUDIT_FINDINGS.md` for the original T1–T5 audit.
+**Status (2026-04-20, updated by S8 REQ-DOC-01)**: ✅ COMPLETE — All v2 integration items are
+implemented. See `REQUIREMENTS.md` rows 6–12 for the per-sortie evidence.
+Original T1–T5 audit: `AUDIT_FINDINGS.md`.
 
 ### What Is Implemented Today
 
@@ -175,34 +174,27 @@ verification, pre-load download, and memory budgeting are still outstanding. See
   (`CatalogRegistration.swift:118-140`). The pipeline does not yet call the latter
   (see below).
 
-### What Is NOT Yet Implemented
+### What Was NOT Yet Implemented (Now Complete)
 
-These bullets replace the previous "all complete" audit checklist; every item has a
-corresponding sortie in `REQUIREMENTS.md`.
+All items below were outstanding at audit time (2026-04-20). Each has been satisfied by
+OPERATION RIVETED PIPEWORK sorties S1–S7. See `REQUIREMENTS.md` rows 6–12 for evidence.
 
-- ❌ **SHA-256 checksums** — every `ComponentFile` in `CatalogRegistration.swift`
-  omits `sha256:` and `expectedSizeBytes:`. The integrity-verification loop inside
-  `AcervoManager.withComponentAccess` (which checks `guard let expectedHash = file.sha256`)
-  short-circuits for every file. (REQ-T4)
-- ❌ **`Acervo.ensureComponentReady` in load path** — `DiffusionPipeline.loadModels`
-  does not pre-download. A first-run call with an empty cache throws
-  `AcervoError.componentNotDownloaded` from inside `withComponentAccess`. The
-  "loading flow" block above (step 1) is the **target** behavior, not current code.
-  (REQ-PIPE-01)
-- ✅ **`MemoryManager.hardValidate()` gate in load path** — `DiffusionPipeline.loadModels`
-  now calls `MemoryManager.shared.hardValidate(requiredBytes: peakMemoryBytes)` at entry
-  via the `memoryGate` seam (single up-front gate; phased `softCheck` is deferred).
-  `PipelineError.insufficientMemory(required:available:component:)` surfaces when the
-  budget is exceeded. `MemoryGuardTests.swift` covers the failure and pass-through paths.
-  (REQ-PIPE-02)
-- ❌ **Positional component-id lookup** — `DiffusionPipeline.findComponentId(for:)`
-  uses `_allComponentIds[0|1|2]` as encoder/backbone/decoder. Any recipe that declares
-  IDs in a different order mis-associates weights. (REQ-PIPE-03)
-- ❌ **Dependency floor** — `Package.swift` still declares `SwiftAcervo` at
-  `from: "0.5.6"` even though the resolved version is 0.7.2 and v2 symbols only ship
-  from 0.7.x. Fresh resolutions can regress. (REQ-T5)
-- ❌ **v2 integration tests** — no test in `Tests/` invokes `withComponentAccess`,
-  `WeightLoader.load`, or forces an `integrityCheckFailed`. (REQ-INT-01)
+- ✅ **SHA-256 checksums** — all 11 `ComponentFile` entries in `CatalogRegistration.swift`
+  now carry `sha256:` and `expectedSizeBytes:`. Count: 5 T5-XXL shards + 4 T5-XXL metadata
+  + 2 SDXL VAE = 11 (plan originally assumed 6; T5 is sharded). (REQ-T4, S2 `dc88d6d`)
+- ✅ **`Acervo.ensureComponentReady` in load path** — `DiffusionPipeline.loadModels`
+  calls `componentReadinessService.ensureComponentReady(componentId)` per segment before
+  `WeightLoader.load`. First-run cache misses auto-download. (REQ-PIPE-01, S3 `de8212c`)
+- ✅ **`MemoryManager.hardValidate()` gate in load path** — single up-front gate via
+  `memoryGate` seam; throws `PipelineError.insufficientMemory(required:available:component:)`.
+  `MemoryGuardTests.swift` covers failure and pass-through paths. (REQ-PIPE-02, S4 `0c58bf5`)
+- ✅ **Positional component-id lookup replaced** — `_componentIdByRole: [PipelineRole: String]`
+  replaces `_allComponentIds`; `findComponentId(for:)` is now a dictionary lookup.
+  (REQ-PIPE-03, S5 `405168e`)
+- ✅ **Dependency floor** — `Package.swift` now declares `from: "0.7.2"`. (REQ-T5, S1 `0aa8fcf`)
+- ✅ **v2 integration tests** — `WeightLoaderIntegrationTests.swift` and
+  `ComponentIntegrityTests.swift` cover happy path, integrity failure,
+  not-downloaded, and LoRA `withLocalAccess`. (REQ-INT-01, S6 `bf761d0`)
 
 ### Pattern Details (As Implemented)
 
@@ -239,10 +231,9 @@ for segment in [encoder, backbone, decoder]:
 - LoRA reuse the same closure-scoped discipline via `withLocalAccess`.
 - Single up-front memory gate (`hardValidate`) fires before any I/O.
 
-**Key properties still missing** (see sortie list above):
-- Phased `softCheck` per loading phase (deferred; single up-front gate is in place).
-- No integrity verification in practice (all `sha256` are `nil`).
-- No memory budget gate before allocating.
+**Key properties remaining deferred** (non-blocking; out of scope for OPERATION RIVETED PIPEWORK):
+- Phased `softCheck` per loading phase (deferred; single up-front `hardValidate` gate is in place and sufficient for current hardware profiles).
+- Integrity verification is now active: all 11 `ComponentFile` entries carry `sha256:`; the `AcervoManager.withComponentAccess` integrity loop no longer short-circuits.
 
 ### MACF / Sandboxed Enumeration Behavior
 
@@ -311,31 +302,42 @@ also triggers the `let` initializer on first use.
 ### Audit Checklist (Honest Boxes)
 
 - [x] `AcervoManager.withComponentAccess()` used for scoped weight file access.
+      (`Sources/Tuberia/Infrastructure/WeightLoader.swift:40`)
 - [x] `AcervoManager.withLocalAccess()` used for LoRA adapters.
+      (`WeightLoader.swift:132` — `loadFromPath` routes LoRA through `withLocalAccess`)
 - [x] No file paths stored outside closure scope.
+      (URLs from `handle.urls(matching:)` are consumed inside the `withComponentAccess` block; WeightLoader never stores them)
 - [x] `TuberiaCatalog` registers `ComponentDescriptor`s via `Acervo.register(_:)` at
-      module init.
+      module init. (`CatalogRegistration.swift:128-129` — `_registerTuberiaCatalogComponents`
+      private `let` fires on first import)
 - [x] Error mapping: `AcervoError` → `PipelineError.modelNotDownloaded` /
-      `PipelineError.weightLoadingFailed`.
+      `PipelineError.weightLoadingFailed`. (`WeightLoader.swift:95-109`)
 - [x] AGENTS.md documents component registration (section "Project Overview" + v0.3.0
-      changelog entry).
-- [ ] **SHA-256 checksums** populated on every `ComponentFile` (REQ-T4).
-- [ ] **`Acervo.ensureComponentReady`** invoked before `WeightLoader.load`
-      (REQ-PIPE-01).
+      changelog entry; v0.3.8 entry adds full OPERATION RIVETED PIPEWORK summary).
+- [x] **SHA-256 checksums** populated on every `ComponentFile` (REQ-T4, S2 `dc88d6d`).
+      All 11 entries in `CatalogRegistration.swift` carry `sha256:` and `expectedSizeBytes:`.
+      Count is 11, not 6: 5 T5-XXL safetensors shards + 4 T5-XXL metadata + 2 SDXL VAE.
+- [x] **`Acervo.ensureComponentReady`** invoked before `WeightLoader.load`
+      (REQ-PIPE-01, S3 `de8212c`). `DiffusionPipeline.loadModels` calls
+      `componentReadinessService.ensureComponentReady(componentId)` per segment at line 268.
 - [x] **`MemoryManager.hardValidate()` invoked from the load path** — single up-front
       gate against `peakMemoryBytes` at entry of `loadModels(progress:)`; throws
       `PipelineError.insufficientMemory(required:available:component:)` on budget
-      exhaustion. Phased `softCheck` is deferred (REQ-PIPE-02, S4).
+      exhaustion. Phased `softCheck` is deferred (REQ-PIPE-02, S4 `0c58bf5`).
       `MemoryGuardTests.swift` verifies the failure and pass-through paths.
-- [ ] **Role-based component-id mapping** replaces positional
-      `findComponentId(for:)` (REQ-PIPE-03).
-- [ ] **`SwiftAcervo` dependency floor** bumped to ≥ 0.7.2 in `Package.swift`
-      (REQ-T5).
-- [ ] **End-to-end v2 integration tests**: happy-path, integrity failure,
-      not-downloaded, LoRA local-access (REQ-INT-01).
-- [ ] MACF workaround doc updated to reflect the current stat-based probe (done in
-      this document; remove stale `VINETAS_TEST_MODELS_DIR` references from AGENTS.md
-      if present).
+- [x] **Role-based component-id mapping** replaces positional
+      `findComponentId(for:)` (REQ-PIPE-03, S5 `405168e`). `_componentIdByRole: [PipelineRole: String]`
+      replaces `_allComponentIds`; lookup is now `_componentIdByRole[role]` (line 597).
+- [x] **`SwiftAcervo` dependency floor** bumped to ≥ 0.7.2 in `Package.swift`
+      (REQ-T5, S1 `0aa8fcf`). `Package.swift:27` now reads `from: "0.7.2"`.
+- [x] **End-to-end v2 integration tests**: happy-path, integrity failure,
+      not-downloaded, LoRA local-access (REQ-INT-01, S6 `bf761d0`).
+      `Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift` and
+      `ComponentIntegrityTests.swift` both present.
+- [x] MACF workaround doc updated to reflect the current stat-based probe (done in
+      this document in the "MACF / Sandboxed Enumeration Behavior" section above).
+      `VINETAS_TEST_MODELS_DIR` is absent from `Sources/`; the v0.3.4 AGENTS.md entry
+      that mentions it is an accurate historical record of what that release did.
 
 ### Reference
 

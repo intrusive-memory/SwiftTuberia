@@ -8,6 +8,16 @@ This file provides comprehensive documentation for AI agents working with the Sw
 
 ## Recent Changes
 
+### v0.3.8 — SwiftAcervo v2 Integration Complete (OPERATION RIVETED PIPEWORK)
+
+- **SwiftAcervo floor bumped to 0.7.2** (REQ-T5, S1 `0aa8fcf`) — `Package.swift` now declares `from: "0.7.2"`, ensuring fresh resolutions never regress to v1 symbols. Resolves the gap between `Package.resolved` pin and declared floor.
+- **SHA-256 checksums on all 11 ComponentFile descriptors** (REQ-T4, S2 `dc88d6d`) — all `ComponentFile` entries in `CatalogRegistration.swift` now carry `sha256:` and `expectedSizeBytes:`. Coverage: 5 T5-XXL safetensors shards + 4 T5-XXL metadata files + 2 SDXL VAE files = 11 total (plan originally assumed 6; T5 is sharded). Integrity-verification loop in `AcervoManager.withComponentAccess` no longer silently no-ops.
+- **`Acervo.ensureComponentReady` wired before weight loading** (REQ-PIPE-01, S3 `de8212c`) — `DiffusionPipeline.loadModels(progress:)` now calls `ensureComponentReady` per segment (via `ComponentReadinessService` seam) before invoking `WeightLoader.load`. First-run cache misses auto-download instead of throwing `componentNotDownloaded`.
+- **`MemoryManager.hardValidate()` gate in load path** (REQ-PIPE-02, S4 `0c58bf5`) — single up-front `hardValidate(peakMemoryBytes)` call at entry to `loadModels(progress:)` via the `memoryGate` seam. Throws `PipelineError.insufficientMemory(required:available:component:)` on budget exhaustion. Phased `softCheck` per phase is deferred. `MemoryGuardTests.swift` covers both failure and pass-through paths.
+- **Role-based component-id lookup replaces positional indexing** (REQ-PIPE-03, S5 `405168e`) — `_allComponentIds: [String]` replaced with `_componentIdByRole: [PipelineRole: String]`; `findComponentId(for:)` is now a dictionary lookup keyed by `PipelineRole`. `PipelineRecipe` protocol gains `componentIdFor: [PipelineRole: String]` with a default implementation that preserves the previous positional convention. Eliminates silent mis-association for recipes that emit IDs in a non-canonical order.
+- **End-to-end `withComponentAccess` integration tests** (REQ-INT-01, S6 `bf761d0`) — new `WeightLoaderIntegrationTests.swift` and `ComponentIntegrityTests.swift` in `TuberiaCatalogTests` cover: happy path, integrity failure (`AcervoError.integrityCheckFailed`), not-downloaded failure, and LoRA `withLocalAccess`. All tests use synthetic tensors; no network or real CDN weights.
+- **CDN manifest cross-check in CI** (REQ-CDN-01, S7 `f4e6939`) — new `VerifyComponentManifest` SwiftPM executable target (`Tools/VerifyComponentManifest/main.swift`) compares per-file `{path, size, sha256}` from a downloaded `manifest.json` against `CatalogRegistration` descriptors; exits non-zero on any divergence. Step added to `.github/workflows/ensure-model-cdn.yml` after `Verify upload`.
+
 ### v0.3.7
 - **SwiftAcervo floor bumped to 0.7.2** (REQ-T5) — enables v2 API access (`withComponentAccess`, `ComponentFile.sha256`, `ComponentHandle`, `Acervo.register`, `Acervo.ensureComponentReady`, `AcervoError.integrityCheckFailed`). Package.resolved lock remains consistent.
 
@@ -62,6 +72,10 @@ SwiftTuberia ("tuberia" -- Spanish for "plumbing" or "piping system") is a compo
 Two products:
 - **Tuberia** -- Protocols + infrastructure (TextEncoder, Scheduler, Backbone, Decoder, Renderer protocols; WeightLoader, MemoryManager, LoRA, Progress)
 - **TuberiaCatalog** -- Concrete shared components (T5-XXL, SDXL VAE, DPM-Solver++, FlowMatch Euler, ImageRenderer, AudioRenderer)
+
+Documentation:
+- [REQUIREMENTS.md](REQUIREMENTS.md) — active mission scope
+- [GENERATION_PATHS.md](GENERATION_PATHS.md) — generation path analysis
 
 ## Dependencies
 
