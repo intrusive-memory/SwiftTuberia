@@ -8,6 +8,9 @@ This file provides comprehensive documentation for AI agents working with the Sw
 
 ## Recent Changes
 
+### v0.3.7
+- **SwiftAcervo floor bumped to 0.7.2** (REQ-T5) — enables v2 API access (`withComponentAccess`, `ComponentFile.sha256`, `ComponentHandle`, `Acervo.register`, `Acervo.ensureComponentReady`, `AcervoError.integrityCheckFailed`). Package.resolved lock remains consistent.
+
 ### v0.3.6
 - **DiffusionPipeline**: Cast backbone output to float32 before scheduler math — prevents float16 rounding error amplification (~157×) at high-noise timesteps, fixing channel-specific bias accumulation in PixArt fixtures.
 - **WeightLoader**: Move MACF bypass before empty-safetensors guard — ensures the bypass fires before any early-exit check.
