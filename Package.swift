@@ -17,6 +17,10 @@ let package = Package(
       name: "TuberiaCatalog",
       targets: ["TuberiaCatalog"]
     ),
+    .executable(
+      name: "VerifyComponentManifest",
+      targets: ["VerifyComponentManifest"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.2"),
@@ -39,6 +43,15 @@ let package = Package(
         "Tuberia",
         .product(name: "Transformers", package: "swift-transformers"),
       ]
+    ),
+    // VerifyComponentManifest — CDN manifest cross-check tool.
+    // Invoked from CI after `acervo upload` to verify the uploaded manifest.json
+    // matches the sha256 and sizeBytes values registered in CatalogRegistration.swift.
+    // Plugin-free; depends only on TuberiaCatalog (and transitively SwiftAcervo).
+    .executableTarget(
+      name: "VerifyComponentManifest",
+      dependencies: ["TuberiaCatalog"],
+      path: "Tools/VerifyComponentManifest"
     ),
     .testTarget(
       name: "TuberiaTests",
