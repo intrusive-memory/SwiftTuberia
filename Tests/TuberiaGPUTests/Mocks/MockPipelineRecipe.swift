@@ -29,6 +29,14 @@ where
   public let unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy
   public let allComponentIds: [String]
 
+  /// Optional override for the role-to-ID map.
+  ///
+  /// When `nil`, the protocol extension default applies (zip of `allComponentIds` with
+  /// `PipelineRole.allCases`). Tests that need non-default role mapping (e.g. a reversed
+  /// map to verify that the pipeline uses the map rather than positional indexing) can
+  /// supply an explicit dictionary here.
+  private let _componentIdForOverride: [PipelineRole: String]?
+
   private let _quantizationConfig: QuantizationConfig
   private let _customValidation: (@Sendable () throws -> Void)?
 
@@ -41,6 +49,7 @@ where
     supportsImageToImage: Bool = false,
     unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy = .emptyPrompt,
     allComponentIds: [String] = [],
+    componentIdForOverride: [PipelineRole: String]? = nil,
     quantizationConfig: QuantizationConfig = .asStored,
     customValidation: (@Sendable () throws -> Void)? = nil
   ) {
@@ -52,8 +61,23 @@ where
     self.supportsImageToImage = supportsImageToImage
     self.unconditionalEmbeddingStrategy = unconditionalEmbeddingStrategy
     self.allComponentIds = allComponentIds
+    self._componentIdForOverride = componentIdForOverride
     self._quantizationConfig = quantizationConfig
     self._customValidation = customValidation
+  }
+
+  /// Returns the explicit override map when provided; otherwise falls through to the
+  /// protocol extension default (zip of `allComponentIds` with `PipelineRole.allCases`).
+  public var componentIdFor: [PipelineRole: String] {
+    if let override = _componentIdForOverride {
+      return override
+    }
+    // Protocol extension default: zip allComponentIds with PipelineRole.allCases.
+    var map: [PipelineRole: String] = [:]
+    for (role, id) in zip(PipelineRole.allCases, allComponentIds) {
+      map[role] = id
+    }
+    return map
   }
 
   public func quantizationFor(_ role: PipelineRole) -> QuantizationConfig {
@@ -77,6 +101,7 @@ where
     supportsImageToImage: Bool = false,
     unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy = .emptyPrompt,
     allComponentIds: [String] = [],
+    componentIdForOverride: [PipelineRole: String]? = nil,
     quantizationConfig: QuantizationConfig = .asStored,
     customValidation: (@Sendable () throws -> Void)? = nil
   ) async throws -> DiffusionPipeline<E, S, B, D, R> {
@@ -89,6 +114,7 @@ where
       supportsImageToImage: supportsImageToImage,
       unconditionalEmbeddingStrategy: unconditionalEmbeddingStrategy,
       allComponentIds: allComponentIds,
+      componentIdForOverride: componentIdForOverride,
       quantizationConfig: quantizationConfig,
       customValidation: customValidation
     )

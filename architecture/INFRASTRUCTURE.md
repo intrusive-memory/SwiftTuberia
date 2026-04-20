@@ -84,13 +84,14 @@ actor MemoryManager {
 
 ### Consumer Usage Patterns
 
-**DiffusionPipeline** (internal):
+**DiffusionPipeline** (internal, as of REQ-PIPE-02 S4 `0c58bf5`):
 ```
-loadModels() → softCheck(peakMemoryBytes)
-  if insufficient → fallback to phased loading
-  between phases → clearGPUCache()
+loadModels() → hardValidate(peakMemoryBytes)         // single up-front gate via memoryGate seam
+  if insufficient → throws PipelineError.insufficientMemory(required:available:component:)
   after each segment load → registerLoaded(component, bytes)
 ```
+Note: phased loading with `softCheck` per phase is deferred. Real peak-vs-phase divergence
+has not been observed for current model configurations.
 
 **SwiftVoxAlta** (external):
 ```

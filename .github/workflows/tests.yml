@@ -28,9 +28,13 @@ jobs:
             -destination 'platform=macOS,arch=arm64'
 
       - name: Test (non-GPU)
+        # -parallel-testing-enabled NO: MLX's Metal GPU stream is
+        # process-global and Swift Testing's default cross-suite
+        # parallelism races on the shared command buffer.
         run: |
           xcodebuild test \
             -scheme SwiftTuberia-Package \
             -destination 'platform=macOS,arch=arm64' \
+            -parallel-testing-enabled NO \
             -only-testing:TuberiaTests \
             -only-testing:TuberiaCatalogTests

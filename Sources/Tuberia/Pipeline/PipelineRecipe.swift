@@ -35,6 +35,30 @@ public protocol PipelineRecipe: Sendable {
   var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { get }
   var allComponentIds: [String] { get }
 
+  /// Maps each pipeline role to its component ID.
+  ///
+  /// Conformers that need role-specific control (e.g. tests reversing the mapping)
+  /// may override this. The default implementation zips `allComponentIds` with
+  /// `PipelineRole.allCases` in iteration order, preserving the positional
+  /// convention without hard-coding array indices in the pipeline.
+  var componentIdFor: [PipelineRole: String] { get }
+
   func quantizationFor(_ role: PipelineRole) -> QuantizationConfig
   func validate() throws
+}
+
+// MARK: - Default implementations
+
+extension PipelineRecipe {
+  /// Derives the role-to-ID map from `allComponentIds` by zipping with `PipelineRole.allCases`.
+  ///
+  /// Roles without a corresponding entry in `allComponentIds` are omitted from the map
+  /// (i.e. their lookup returns `nil` in `findComponentId(for:)`).
+  public var componentIdFor: [PipelineRole: String] {
+    var map: [PipelineRole: String] = [:]
+    for (role, id) in zip(PipelineRole.allCases, allComponentIds) {
+      map[role] = id
+    }
+    return map
+  }
 }

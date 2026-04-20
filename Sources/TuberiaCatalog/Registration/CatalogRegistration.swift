@@ -2,174 +2,142 @@ import Foundation
 import SwiftAcervo
 import Tuberia
 
-/// Describes a catalog component that can be downloaded and used by the pipeline.
-///
-/// This is the TuberiaCatalog-local component descriptor type. When SwiftAcervo v2
-/// ships its own `ComponentDescriptor` and registry API, this type will be migrated
-/// to use those. For now, this provides the metadata needed for component discovery
-/// and download orchestration.
-public struct ComponentDescriptor: Sendable {
-  /// Unique component identifier (e.g., "t5-xxl-encoder-int4").
-  public let componentId: String
-  /// The role this component plays in the pipeline.
-  public let componentType: ComponentType
-  /// HuggingFace repository (org/repo format) where the weights are hosted.
-  public let huggingFaceRepo: String
-  /// Glob patterns for the files needed from the repository.
-  public let filePatterns: [String]
-  /// Estimated total size in bytes for memory budgeting.
-  public let estimatedSizeBytes: Int
-  /// Optional SHA-256 checksums for integrity verification.
-  /// `nil` means skip verification (checksums populated after weight conversion).
-  public let sha256Checksums: [String: String]?
+// MARK: - Required Component Files
 
-  public init(
-    componentId: String,
-    componentType: ComponentType,
-    huggingFaceRepo: String,
-    filePatterns: [String],
-    estimatedSizeBytes: Int,
-    sha256Checksums: [String: String]? = nil
-  ) {
-    self.componentId = componentId
-    self.componentType = componentType
-    self.huggingFaceRepo = huggingFaceRepo
-    self.filePatterns = filePatterns
-    self.estimatedSizeBytes = estimatedSizeBytes
-    self.sha256Checksums = sha256Checksums
-  }
-}
+/// T5-XXL Encoder (int4 quantized) required files.
+///
+/// The model is hosted on HuggingFace at `intrusive-memory/t5-xxl-int4-mlx`.
+/// All safetensors shards, configuration, and tokenizer files are required for
+/// both weight loading and tokenization.
+///
+/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
+private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "tokenizer.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "tokenizer_config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "special_tokens_map.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00000-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00001-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00002-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00003-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(
+    relativePath: "model-00004-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+]
 
-/// The role a component plays in the pipeline.
-public enum ComponentType: String, Sendable {
-  case encoder
-  case scheduler
-  case backbone
-  case decoder
-  case renderer
-}
+/// SDXL VAE Decoder (fp16) required files.
+///
+/// The model is hosted on HuggingFace at `intrusive-memory/sdxl-vae-fp16-mlx`.
+/// Includes the model weights and configuration for decoding.
+///
+/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
+private let sdxlVAEDecoderRequiredFiles: [ComponentFile] = [
+  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model.safetensors", expectedSizeBytes: nil, sha256: nil),
+]
 
-/// Registers and tracks all TuberiaCatalog's shared component descriptors.
+// MARK: - Acervo Component Registration
+
+/// T5-XXL Encoder component descriptor.
 ///
-/// Registration is triggered by calling `CatalogRegistration.ensureRegistered()`.
-/// This is idempotent -- duplicate registration is silently ignored.
+/// Registered at module initialization so the Acervo Component Registry
+/// is populated before any model loading or download is attempted.
+private let t5XXLEncoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
+  id: "t5-xxl-encoder-int4",
+  type: .encoder,
+  displayName: "T5-XXL Text Encoder (int4)",
+  repoId: "intrusive-memory/t5-xxl-int4-mlx",
+  files: t5XXLEncoderRequiredFiles,
+  estimatedSizeBytes: 1_288_490_188,  // ~1.2 GB
+  minimumMemoryBytes: 2_000_000_000,
+  metadata: [
+    "component_role": "text_encoder",
+    "quantization": "int4",
+    "output_dim": "4096",
+    "max_sequence_length": "512",
+  ]
+)
+
+/// SDXL VAE Decoder component descriptor.
 ///
-/// Only weighted components are registered (T5-XXL encoder, SDXL VAE decoder).
-/// Schedulers and renderers have no weights and need no component descriptor.
+/// Registered at module initialization so the Acervo Component Registry
+/// is populated before any model loading or download is attempted.
+private let sdxlVAEDecoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
+  id: "sdxl-vae-decoder-fp16",
+  type: .decoder,
+  displayName: "SDXL VAE Decoder (fp16)",
+  repoId: "intrusive-memory/sdxl-vae-fp16-mlx",
+  files: sdxlVAEDecoderRequiredFiles,
+  estimatedSizeBytes: 167_772_160,  // ~160 MB
+  minimumMemoryBytes: 500_000_000,
+  metadata: [
+    "component_role": "decoder",
+    "quantization": "fp16",
+    "latent_channels": "4",
+  ]
+)
+
+/// Module-level registration trigger.
 ///
-/// Components can be queried by ID or enumerated. This acts as a lightweight
-/// registry until SwiftAcervo v2's full Component Registry is available.
+/// This `let` is evaluated once (lazily) on first access, registering all
+/// TuberiaCatalog component descriptors with the SwiftAcervo Component Registry.
+private let _registerTuberiaCatalogComponents: Void = {
+  Acervo.register([
+    t5XXLEncoderComponentDescriptor,
+    sdxlVAEDecoderComponentDescriptor,
+  ])
+}()
+
+// MARK: - CatalogRegistration
+
+/// Public interface to TuberiaCatalog's component registration and discovery.
+///
+/// This class ensures Acervo components are registered and provides utility
+/// methods for component lookup. The actual registration is handled by the
+/// private `_registerTuberiaCatalogComponents` trigger.
 public final class CatalogRegistration: @unchecked Sendable {
 
   /// Singleton instance.
   public static let shared = CatalogRegistration()
 
-  /// Thread-safe storage for registered descriptors.
-  private var descriptors: [String: ComponentDescriptor] = [:]
-  private let lock = NSLock()
-  private var isRegistered = false
-
   private init() {}
 
-  // MARK: - Component Descriptors
+  // MARK: - Component Descriptors (Public for convenience)
 
-  /// T5-XXL Encoder (int4 quantized) component descriptor.
-  public static let t5XXLEncoderDescriptor = ComponentDescriptor(
-    componentId: "t5-xxl-encoder-int4",
-    componentType: .encoder,
-    huggingFaceRepo: "intrusive-memory/t5-xxl-int4-mlx",
-    filePatterns: ["*.safetensors", "tokenizer.json", "tokenizer_config.json", "config.json"],
-    estimatedSizeBytes: 1_288_490_188,  // ~1.2 GB
-    sha256Checksums: nil  // Populated after weight conversion
-  )
+  /// T5-XXL Encoder (int4 quantized) component ID.
+  public static let t5XXLEncoderComponentId = "t5-xxl-encoder-int4"
 
-  /// SDXL VAE Decoder (fp16) component descriptor.
-  public static let sdxlVAEDecoderDescriptor = ComponentDescriptor(
-    componentId: "sdxl-vae-decoder-fp16",
-    componentType: .decoder,
-    huggingFaceRepo: "intrusive-memory/sdxl-vae-fp16-mlx",
-    filePatterns: ["*.safetensors", "config.json"],
-    estimatedSizeBytes: 167_772_160,  // ~160 MB
-    sha256Checksums: nil  // Populated after weight conversion
-  )
+  /// SDXL VAE Decoder (fp16) component ID.
+  public static let sdxlVAEDecoderComponentId = "sdxl-vae-decoder-fp16"
 
-  // MARK: - Registration
+  // MARK: - Ensure Registration
 
   /// Ensure all catalog components are registered.
   /// Safe to call multiple times -- only performs registration on first call.
   public func ensureRegistered() {
-    lock.lock()
-    defer { lock.unlock() }
-
-    guard !isRegistered else { return }
-
-    registerUnsafe(CatalogRegistration.t5XXLEncoderDescriptor)
-    registerUnsafe(CatalogRegistration.sdxlVAEDecoderDescriptor)
-
-    isRegistered = true
+    _ = _registerTuberiaCatalogComponents
   }
 
-  /// Register a component descriptor. Duplicate IDs are silently ignored.
-  public func register(_ descriptor: ComponentDescriptor) {
-    lock.lock()
-    defer { lock.unlock() }
-    registerUnsafe(descriptor)
-  }
-
-  /// Internal registration without locking. Caller must hold `lock`.
-  private func registerUnsafe(_ descriptor: ComponentDescriptor) {
-    // Deduplicate: same ID = no-op
-    if descriptors[descriptor.componentId] != nil {
-      return
-    }
-    descriptors[descriptor.componentId] = descriptor
-  }
-
-  // MARK: - Queries
+  // MARK: - Queries (delegated to Acervo)
 
   /// Look up a component descriptor by its ID.
-  public func descriptor(for componentId: String) -> ComponentDescriptor? {
-    lock.lock()
-    defer { lock.unlock() }
-    return descriptors[componentId]
-  }
-
-  /// Return all registered component IDs.
-  public func registeredComponentIds() -> [String] {
-    lock.lock()
-    defer { lock.unlock() }
-    return Array(descriptors.keys)
-  }
-
-  /// Return all registered component descriptors.
-  public func registeredDescriptors() -> [ComponentDescriptor] {
-    lock.lock()
-    defer { lock.unlock() }
-    return Array(descriptors.values)
+  public func descriptor(for componentId: String) -> SwiftAcervo.ComponentDescriptor? {
+    Acervo.component(componentId)
   }
 
   /// Check if a component is registered.
   public func isComponentRegistered(_ componentId: String) -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    return descriptors[componentId] != nil
+    Acervo.component(componentId) != nil
   }
 
-  /// Get the HuggingFace repo for a component. Used to bridge to Acervo v1's
-  /// download API (`Acervo.ensureAvailable(modelId:)`).
-  public func huggingFaceRepo(for componentId: String) -> String? {
-    lock.lock()
-    defer { lock.unlock() }
-    return descriptors[componentId]?.huggingFaceRepo
-  }
-
-  // MARK: - Reset (for testing)
-
-  /// Reset the registry to empty state. Only for testing.
-  internal func reset() {
-    lock.lock()
-    defer { lock.unlock() }
-    descriptors.removeAll()
-    isRegistered = false
+  /// Ensure a component is downloaded and ready.
+  ///
+  /// - Parameter componentId: The component to prepare.
+  /// - Throws: AcervoError if download or validation fails.
+  public func ensureComponentReady(_ componentId: String) async throws {
+    try await Acervo.ensureComponentReady(componentId)
   }
 }

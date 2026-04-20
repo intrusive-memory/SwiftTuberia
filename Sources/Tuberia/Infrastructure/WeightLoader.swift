@@ -7,7 +7,7 @@ import SwiftAcervo
 /// safetensors or accesses files directly.
 ///
 /// Loading pipeline (internal to WeightLoader):
-/// 1. Access the component's directory via Acervo
+/// 1. Access the component's directory via Acervo v2 `withComponentAccess`
 /// 2. Find all `.safetensors` files (handles sharded weights)
 /// 3. For each safetensors file, for each key:
 ///    a. `keyMapping(originalKey)` -> remappedKey (nil = skip)
@@ -18,12 +18,12 @@ public struct WeightLoader: Sendable {
 
   /// Load weights from an Acervo component's safetensors files.
   ///
-  /// The component is identified by its Acervo model ID. File access is scoped
-  /// through `AcervoManager.shared.withModelAccess` -- URLs are never stored beyond
-  /// the closure scope.
+  /// The component is identified by its Acervo component ID. File access is scoped
+  /// through `AcervoManager.shared.withComponentAccess` -- URLs are never stored beyond
+  /// the closure scope. This ensures integrity verification is performed.
   ///
   /// - Parameters:
-  ///   - componentId: The Acervo component/model ID to load from.
+  ///   - componentId: The Acervo component ID to load from.
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform applied after key remapping, before quantization.
   ///   - quantization: Quantization strategy to apply to loaded tensors.
@@ -37,39 +37,21 @@ public struct WeightLoader: Sendable {
     quantization: QuantizationConfig = .asStored
   ) async throws -> ModuleParameters {
     do {
-      let result = try await AcervoManager.shared.withModelAccess(componentId) {
-        directoryURL -> ModuleParameters in
-        print("[WeightLoader] withModelAccess directory for '\(componentId)': \(directoryURL.path)")
+      let result = try await AcervoManager.shared.withComponentAccess(componentId) {
+        handle -> ModuleParameters in
+        print("[WeightLoader] withComponentAccess for component '\(componentId)'")
 
-        // Resolve effective safetensors URLs, applying the MACF test-models bypass
-        // BEFORE checking for empty results.
-        //
-        // The bypass serves two purposes:
-        //   1. MACF blocks fopen() for unentitled xctest processes. opendir/stat succeed
-        //      but file reads fail. We redirect to pre-hardlinked files in /tmp.
-        //   2. Locally-generated weights (e.g. fp16 DiT from dequantize_dit_to_fp16.py)
-        //      live in VINETAS_TEST_MODELS_DIR but have no counterpart in the App Group
-        //      container. The bypass must fire BEFORE the empty-safetensors guard.
-        //
-        // Guard conditions:
-        //   1. The resolved directory is inside a Group Containers path (App Group).
-        //   2. VINETAS_TEST_MODELS_DIR is set (only GPU/fixture Makefile targets set this).
+        // Resolve safetensors URLs from the component handle via v2 API.
+        // The handle abstracts away the storage location and applies integrity checks.
         let effectiveURLs: [URL]
-        if directoryURL.path.contains("/Group Containers/"),
-          let baseDir = ProcessInfo.processInfo.environment["VINETAS_TEST_MODELS_DIR"]
-        {
-          let tempDir = URL(fileURLWithPath: baseDir).appendingPathComponent(componentId)
-          let tempURLs = findSafetensorsFiles(in: tempDir)
-          if !tempURLs.isEmpty {
-            print("[WeightLoader] Using test-models-dir files from \(tempDir.path)")
-            effectiveURLs = tempURLs
-          } else {
-            // No files in test dir — fall back to App Group (covers the entitled-app path)
-            print("[WeightLoader] No files in \(tempDir.path), falling back to App Group dir")
-            effectiveURLs = findSafetensorsFiles(in: directoryURL)
-          }
-        } else {
-          effectiveURLs = findSafetensorsFiles(in: directoryURL)
+        do {
+          effectiveURLs = try handle.urls(matching: ".safetensors")
+        } catch {
+          // No safetensors files found in descriptor
+          throw PipelineError.weightLoadingFailed(
+            component: componentId,
+            reason: "Component descriptor has no .safetensors files: \(error)"
+          )
         }
 
         print("[WeightLoader] effective safetensors count: \(effectiveURLs.count)")
