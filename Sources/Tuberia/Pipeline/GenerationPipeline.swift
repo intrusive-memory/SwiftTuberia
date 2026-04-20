@@ -21,7 +21,7 @@ public protocol GenerationPipeline: Sendable {
 
   func generate(request: Request, progress: @Sendable (PipelineProgress) -> Void) async throws
     -> Result
-  func loadModels(progress: @Sendable (Double, String) -> Void) async throws
+  func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws
   func unloadModels() async
   var memoryRequirement: MemoryRequirement { get }
   var isLoaded: Bool { get }

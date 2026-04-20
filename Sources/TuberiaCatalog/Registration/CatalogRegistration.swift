@@ -7,34 +7,31 @@ import Tuberia
 /// T5-XXL Encoder (int4 quantized) required files.
 ///
 /// The model is hosted on HuggingFace at `intrusive-memory/t5-xxl-int4-mlx`.
-/// All safetensors files, configuration, and tokenizer files are required for
+/// All safetensors shards, configuration, and tokenizer files are required for
 /// both weight loading and tokenization.
+///
+/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
 private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
-  ComponentFile(
-    relativePath: "config.json"
-  ),
-  ComponentFile(
-    relativePath: "tokenizer.json"
-  ),
-  ComponentFile(
-    relativePath: "tokenizer_config.json"
-  ),
-  ComponentFile(
-    relativePath: "model.safetensors"
-  ),
+  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "tokenizer.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "tokenizer_config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "special_tokens_map.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model-00000-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model-00001-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model-00002-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model-00003-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model-00004-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
 ]
 
 /// SDXL VAE Decoder (fp16) required files.
 ///
 /// The model is hosted on HuggingFace at `intrusive-memory/sdxl-vae-fp16-mlx`.
 /// Includes the model weights and configuration for decoding.
+///
+/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
 private let sdxlVAEDecoderRequiredFiles: [ComponentFile] = [
-  ComponentFile(
-    relativePath: "config.json"
-  ),
-  ComponentFile(
-    relativePath: "model.safetensors"
-  ),
+  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
+  ComponentFile(relativePath: "model.safetensors", expectedSizeBytes: nil, sha256: nil),
 ]
 
 // MARK: - Acervo Component Registration

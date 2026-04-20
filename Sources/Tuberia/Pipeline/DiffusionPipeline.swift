@@ -33,7 +33,9 @@ public actor DiffusionPipeline<
 
   private let _supportsImageToImage: Bool
   private let _unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy
-  private let _allComponentIds: [String]
+  /// Role-keyed component ID map, populated from `recipe.componentIdFor` at init time (REQ-PIPE-03).
+  /// Eliminates the positional array indexing that was used in the original implementation.
+  private let _componentIdByRole: [PipelineRole: String]
   private let _encoderQuantization: QuantizationConfig
   private let _backboneQuantization: QuantizationConfig
   private let _decoderQuantization: QuantizationConfig
@@ -41,6 +43,30 @@ public actor DiffusionPipeline<
   // MARK: - Memory Requirement (computed once from static config)
 
   private let _memoryRequirement: MemoryRequirement
+
+  // MARK: - Component Readiness Seam
+
+  /// Seam for ensuring a component is downloaded before weight loading.
+  ///
+  /// Defaults to the production `AcervoComponentReadinessService`. Tests may replace
+  /// this with a spy by calling `pipeline.setComponentReadinessService(_:)` after
+  /// construction and before `loadModels(progress:)`.
+  var componentReadinessService: any ComponentReadinessService = AcervoComponentReadinessService()
+
+  // MARK: - Memory Gate Seam (REQ-PIPE-02)
+
+  /// Closure invoked at the start of `loadModels(progress:)` to validate available memory.
+  ///
+  /// Defaults to `MemoryManager.shared.hardValidate(requiredBytes:)`.
+  /// Tests may replace this by calling `setMemoryGate(_:)` to inject a stub
+  /// that simulates insufficient memory without touching the hardware query.
+  ///
+  /// Strategy: single up-front `hardValidate(peakMemoryBytes)` (REQ-PIPE-02, S4).
+  /// Phased-loading with `softCheck` per phase is deferred to a future sortie —
+  /// real peak-vs-phase divergence has not been observed in production workloads.
+  var memoryGate: @Sendable (UInt64) async throws -> Void = { requiredBytes in
+    try await MemoryManager.shared.hardValidate(requiredBytes: requiredBytes)
+  }
 
   // MARK: - Init
 
@@ -61,7 +87,7 @@ public actor DiffusionPipeline<
     // Store recipe metadata
     self._supportsImageToImage = recipe.supportsImageToImage
     self._unconditionalEmbeddingStrategy = recipe.unconditionalEmbeddingStrategy
-    self._allComponentIds = recipe.allComponentIds
+    self._componentIdByRole = recipe.componentIdFor
     self._encoderQuantization = recipe.quantizationFor(.encoder)
     self._backboneQuantization = recipe.quantizationFor(.backbone)
     self._decoderQuantization = recipe.quantizationFor(.decoder)
@@ -150,6 +176,22 @@ public actor DiffusionPipeline<
     }
   }
 
+  /// Replace the component readiness service — used by tests to inject a spy.
+  ///
+  /// Call this on the actor before invoking `loadModels(progress:)`. In production
+  /// code the default `AcervoComponentReadinessService` is always used.
+  public func setComponentReadinessService(_ service: any ComponentReadinessService) {
+    componentReadinessService = service
+  }
+
+  /// Replace the memory gate — used by tests to inject a stub that simulates
+  /// insufficient memory without querying real hardware.
+  ///
+  /// Call this on the actor before invoking `loadModels(progress:)`.
+  public func setMemoryGate(_ gate: @escaping @Sendable (UInt64) async throws -> Void) {
+    memoryGate = gate
+  }
+
   // MARK: - GenerationPipeline Conformance
 
   /// Memory requirements -- computed from static config, safe to access without `await`.
@@ -170,7 +212,24 @@ public actor DiffusionPipeline<
   /// Phase 2: Load Backbone + Decoder weights for generation.
   ///
   /// Progress callback receives (fraction: Double, component: String).
-  public func loadModels(progress: @Sendable (Double, String) -> Void) async throws {
+  public func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws {
+    // Memory gate (REQ-PIPE-02, S4): validate available memory before committing to loading.
+    //
+    // Strategy: single up-front hardValidate against peakMemoryBytes.
+    // Phased-loading (softCheck per phase) is deferred — see Open Questions #5 in
+    // EXECUTION_PLAN.md. Any error from hardValidate is a PipelineError.insufficientMemory
+    // and surfaces directly to the caller without wrapping (MemoryManager already throws it).
+    let peak = _memoryRequirement.peakMemoryBytes
+    do {
+      try await memoryGate(peak)
+    } catch let error as PipelineError {
+      // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
+      throw error
+    } catch {
+      // Unexpected error from a custom gate: wrap in insufficientMemory with 0 available.
+      throw PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
+    }
+
     // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
     // This is a non-fatal async step: if tokenizer loading fails, encode() falls
     // back to placeholder tokenization (per INF-2 Option B lifecycle design).
@@ -196,6 +255,26 @@ public actor DiffusionPipeline<
       progress(loadedCount / totalSegments, componentName)
 
       if let componentId = componentId {
+        // Ensure the component files are present on disk (downloads if missing).
+        //
+        // We fold download progress into the existing (Double, String) tick stream rather
+        // than adding a new PipelineProgress case. Adding a case would widen the public
+        // enum and require every switch exhausted by callers to add a new arm — a
+        // breaking change. Folding keeps the contract stable (S8 has nothing new to
+        // document) and is sufficient: the progress bar stays live during downloads.
+        let capturedCount = loadedCount
+        let capturedTotal = totalSegments
+        let capturedName = componentName
+        try await componentReadinessService.ensureComponentReady(componentId) { downloadProgress in
+          // Map Acervo's per-file fraction into the segment's slot in the overall bar.
+          // Each segment occupies a 1/totalSegments window; download fill fills the
+          // first half of that window, leaving the second half for weight-apply below.
+          let slotStart = capturedCount / capturedTotal
+          let slotWidth = 1.0 / capturedTotal
+          let fraction = slotStart + slotWidth * 0.5 * downloadProgress.overallProgress
+          progress(fraction, capturedName)
+        }
+
         let weights = try await WeightLoader.load(
           componentId: componentId,
           keyMapping: segment.keyMapping,
@@ -222,7 +301,7 @@ public actor DiffusionPipeline<
     backbone.unload()
     decoder.unload()
 
-    for componentId in _allComponentIds {
+    for componentId in _componentIdByRole.values {
       await MemoryManager.shared.unregisterLoaded(component: componentId)
     }
 
@@ -510,23 +589,12 @@ public actor DiffusionPipeline<
 
   // MARK: - Private Helpers
 
-  /// Find the component ID for a given pipeline role from the stored component IDs.
-  /// This is a simplified lookup -- in practice, the recipe maps roles to component IDs.
+  /// Find the component ID for a given pipeline role using the role-keyed dictionary.
+  ///
+  /// Dictionary lookup eliminates positional index coupling (REQ-PIPE-03). Any role
+  /// absent from the map returns `nil`, which skips weight loading for that segment.
   private func findComponentId(for role: PipelineRole) -> String? {
-    // Component IDs are stored as a flat array. The recipe knows the mapping.
-    // For a generalized approach, we rely on the order: encoder, backbone, decoder
-    // (matching the weighted segments order). If there are more IDs than segments,
-    // the extras are for scheduler/renderer which have no weights.
-    switch role {
-    case .encoder:
-      return _allComponentIds.count > 0 ? _allComponentIds[0] : nil
-    case .backbone:
-      return _allComponentIds.count > 1 ? _allComponentIds[1] : nil
-    case .decoder:
-      return _allComponentIds.count > 2 ? _allComponentIds[2] : nil
-    case .scheduler, .renderer:
-      return nil
-    }
+    _componentIdByRole[role]
   }
 
   /// Convert a CGImage to an MLXArray with shape [1, height, width, 3] in [0, 1] range.

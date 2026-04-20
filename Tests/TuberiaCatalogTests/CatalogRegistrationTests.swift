@@ -96,10 +96,24 @@ struct CatalogRegistrationTests {
     registry.ensureRegistered()
 
     let t5 = registry.descriptor(for: "t5-xxl-encoder-int4")
-    #expect(t5?.files.count == 4)  // config.json, tokenizer.json, tokenizer_config.json, model.safetensors
+    // config.json, tokenizer.json, tokenizer_config.json, special_tokens_map.json,
+    // model-00000-of-00005.safetensors through model-00004-of-00005.safetensors (5 shards)
+    #expect(t5?.files.count == 9)
 
     let vae = registry.descriptor(for: "sdxl-vae-decoder-fp16")
     #expect(vae?.files.count == 2)  // config.json, model.safetensors
+  }
+
+  @Test("Component descriptors include required files with non-empty relativePaths")
+  func requiredFileRelativePaths() {
+    let registry = CatalogRegistration.shared
+    registry.ensureRegistered()
+
+    let t5 = registry.descriptor(for: "t5-xxl-encoder-int4")
+    let vae = registry.descriptor(for: "sdxl-vae-decoder-fp16")
+    for file in (t5?.files ?? []) + (vae?.files ?? []) {
+      #expect(!file.relativePath.isEmpty, "ComponentFile relativePath must not be empty")
+    }
   }
 
   @Test("Component descriptors include metadata")

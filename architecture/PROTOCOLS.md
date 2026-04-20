@@ -37,7 +37,13 @@ protocol WeightedSegment: Sendable {
 **Conformance pattern**: `final class` with `@unchecked Sendable`. DiffusionPipeline actor serializes access.
 
 **Loading sequence** (orchestrated by pipeline, not by segment):
-1. `Acervo.ensureComponentReady(id)` — download
+
+Pre-loop (once, at `loadModels` entry):
+- `MemoryManager.shared.hardValidate(requiredBytes: peakMemoryBytes)` — single up-front memory gate
+  via `memoryGate` seam; throws `PipelineError.insufficientMemory` if budget insufficient (REQ-PIPE-02, S4).
+
+Per-segment loop (encoder → backbone → decoder):
+1. `Acervo.ensureComponentReady(id)` — download if not cached (REQ-PIPE-01, S3)
 2. `WeightLoader.load(componentId:, keyMapping:, tensorTransform:, quantization:)` → `ModuleParameters`
 3. `segment.apply(weights:)` — segment assigns params to internal modules
 4. `MemoryManager.registerLoaded(component:, bytes:)`
