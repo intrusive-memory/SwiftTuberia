@@ -21,9 +21,10 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.31.3")),
     .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.2")),
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.3")),
     .package(
-      url: "https://github.com/huggingface/swift-transformers", .upToNextMajor(from: "1.3.0")),
+      url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
+      .upToNextMajor(from: "0.3.2"), traits: ["Swift"]),
   ],
   targets: [
     .target(
@@ -39,7 +40,7 @@ let package = Package(
       name: "TuberiaCatalog",
       dependencies: [
         "Tuberia",
-        .product(name: "Transformers", package: "swift-transformers"),
+        .product(name: "Tokenizers", package: "swift-tokenizers"),
       ]
     ),
     .testTarget(

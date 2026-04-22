@@ -22,7 +22,7 @@ import Tuberia
 /// `T5TransformerEncoder`'s property hierarchy.
 ///
 /// Tokenizer: Bundled with weights in the same Acervo component. Loaded via
-/// `swift-transformers` `AutoTokenizer.from(modelFolder:)`.
+/// `swift-tokenizers` `AutoTokenizer.from(directory:)`.
 public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Sendable {
   public typealias Configuration = T5XXLEncoderConfiguration
 
@@ -71,8 +71,8 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
         return tokenizerURL.deletingLastPathComponent()
       }
 
-      // Step 3: Load the tokenizer asynchronously using swift-transformers' AutoTokenizer.
-      let loadedTokenizer = try await AutoTokenizer.from(modelFolder: tokenizerDir)
+      // Step 3: Load the tokenizer asynchronously using swift-tokenizers' AutoTokenizer.
+      let loadedTokenizer = try await AutoTokenizer.from(directory: tokenizerDir)
       self.tokenizer = loadedTokenizer
     } catch {
       // Non-fatal: encode() falls back to placeholder tokenization when tokenizer is nil.
@@ -147,7 +147,7 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     }
   }
 
-  /// Tokenize using the loaded swift-transformers tokenizer.
+  /// Tokenize using the loaded swift-tokenizers tokenizer.
   private func tokenizeWithRealTokenizer(
     _ tok: any Tokenizer,
     text: String,

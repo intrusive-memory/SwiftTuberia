@@ -2,11 +2,20 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.4.0
+**Version**: 0.5.0
 
 ---
 
 ## Recent Changes
+
+### v0.5.0 — Tokenizer dependency migration (swift-transformers → swift-tokenizers)
+
+Mirrors `mlx-audio-swift`'s tokenizer migration. `Package.swift` dependencies:
+- Removed: `huggingface/swift-transformers` (`Transformers` product)
+- Added: `DePasqualeOrg/swift-tokenizers` `.upToNextMajor(from: "0.3.2")` with `traits: ["Swift"]` (`Tokenizers` product)
+- `SwiftAcervo`: `.upToNextMajor(from: "0.7.2")` → `.upToNextMajor(from: "0.7.3")`
+
+`TuberiaCatalog` now consumes only the `Tokenizers` product — the full `Transformers` product is no longer needed, trimming the transitive dep graph (Generation, Hub, Agents, etc.). `T5XXLEncoder` migrated to the new API: `AutoTokenizer.from(modelFolder:)` → `AutoTokenizer.from(directory:)` (one call site). No public API changes for consumers.
 
 ### v0.4.0 — OPERATION RIVETED PIPEWORK release + dependency floor bumps
 
