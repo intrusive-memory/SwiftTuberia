@@ -41,7 +41,6 @@ struct CatalogRegistrationTests {
     #expect(descriptor?.id == "t5-xxl-encoder-int4")
     #expect(descriptor?.type == .encoder)
     #expect(descriptor?.repoId == "intrusive-memory/t5-xxl-int4-mlx")
-    #expect(descriptor?.estimatedSizeBytes == 1_288_490_188)  // ~1.2 GB
   }
 
   @Test("SDXL VAE descriptor has correct metadata")
@@ -54,7 +53,6 @@ struct CatalogRegistrationTests {
     #expect(descriptor?.id == "sdxl-vae-decoder-fp16")
     #expect(descriptor?.type == .decoder)
     #expect(descriptor?.repoId == "intrusive-memory/sdxl-vae-fp16-mlx")
-    #expect(descriptor?.estimatedSizeBytes == 167_772_160)  // ~160 MB
   }
 
   @Test("descriptor(for:) returns correct descriptor by ID")
@@ -90,18 +88,18 @@ struct CatalogRegistrationTests {
     #expect(!registry.isComponentRegistered("unknown-component"))
   }
 
-  @Test("Component descriptors include required files")
+  @Test("Component descriptors use bare initializer — files come from CDN manifest")
   func requiredFiles() {
     let registry = CatalogRegistration.shared
     registry.ensureRegistered()
 
+    // Bare descriptors have no hardcoded files; SwiftAcervo CDN manifest is the
+    // single source of truth for file lists and integrity hashes.
     let t5 = registry.descriptor(for: "t5-xxl-encoder-int4")
-    // config.json, tokenizer.json, tokenizer_config.json, special_tokens_map.json,
-    // model-00000-of-00005.safetensors through model-00004-of-00005.safetensors (5 shards)
-    #expect(t5?.files.count == 9)
+    #expect(t5 != nil)
 
     let vae = registry.descriptor(for: "sdxl-vae-decoder-fp16")
-    #expect(vae?.files.count == 2)  // config.json, model.safetensors
+    #expect(vae != nil)
   }
 
   @Test("Component descriptors include required files with non-empty relativePaths")
