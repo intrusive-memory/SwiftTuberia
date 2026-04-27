@@ -21,7 +21,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.31.3")),
     .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.7.3")),
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.8.3")),
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
       .upToNextMajor(from: "0.3.2"), traits: ["Swift"]),
