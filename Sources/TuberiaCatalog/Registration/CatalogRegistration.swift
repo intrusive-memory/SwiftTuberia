@@ -96,7 +96,11 @@ public final class CatalogRegistration: @unchecked Sendable {
   ///
   /// - Parameter componentId: The component to prepare.
   /// - Throws: AcervoError if download or validation fails.
-  @available(*, deprecated, message: "Use ComponentReadinessService (with progress) or Acervo.ensureComponentReady directly.")
+  @available(
+    *, deprecated,
+    message:
+      "Use ComponentReadinessService (with progress) or Acervo.ensureComponentReady directly."
+  )
   public func ensureComponentReady(_ componentId: String) async throws {
     try await Acervo.ensureComponentReady(componentId)
   }

@@ -103,7 +103,8 @@ public struct WeightLoader: Sendable {
     } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
       throw PipelineError.weightLoadingFailed(
         component: componentId,
-        reason: "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+        reason:
+          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
       )
     } catch {
       throw PipelineError.weightLoadingFailed(
@@ -163,7 +164,8 @@ public struct WeightLoader: Sendable {
     } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
       throw PipelineError.weightLoadingFailed(
         component: path,
-        reason: "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+        reason:
+          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
       )
     } catch {
       throw PipelineError.weightLoadingFailed(

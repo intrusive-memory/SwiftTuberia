@@ -2,11 +2,24 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.5.0
+**Version**: 0.6.0
 
 ---
 
 ## Recent Changes
+
+### v0.6.0 — OPERATION VANISHING MANIFEST: SwiftAcervo v2 compliance
+
+Aligns SwiftTuberia with the SwiftAcervo v2 contract — no manifest synthesis, typed error handling, and the `rootDirectoryURL` access pattern.
+
+- **Bare `ComponentDescriptor` declarations** (Tuberia-S1) — `CatalogRegistration` no longer carries per-file SHA-256 / size shadow data. SwiftAcervo's CDN manifest is the sole source of truth; `ComponentFile` entries are reduced to `path` only.
+- **Deprecated `CatalogRegistration.ensureComponentReady`** (Tuberia-S1) — call sites should use `Acervo.ensureComponentReady` (with progress) or `ComponentReadinessService` directly. Shim retained with `@available(*, deprecated)` for one release.
+- **Typed `AcervoError` handling in `WeightLoader`** (Tuberia-S2) — `loadComponent` and `loadFromPath` catch `AcervoError.integrityCheckFailed(file:expected:actual:)` explicitly and rethrow as `PipelineError.weightLoadingFailed`. Dead `validateChecksum` / `validateSize` paths removed.
+- **`T5XXLEncoder` uses `rootDirectoryURL`** (Tuberia-S3) — replaces direct path manipulation with the v2 access pattern. Adds precondition docstring on directory shape.
+- **`Package.resolved` untracked** — restored to `.gitignore`-honoured state. Library convention is to let consumers resolve.
+- **Dependency floors tightened**:
+  - `SwiftAcervo`: `.upToNextMajor(from: "0.7.3")` → `.upToNextMajor(from: "0.8.3")` — `rootDirectoryURL` (consumed by `T5XXLEncoder.loadTokenizer`) was added in 0.8.3.
+  - `swift-tokenizers`: `.upToNextMajor(from: "0.3.2")` → `.upToNextMajor(from: "0.4.2")` — pin to current latest published release.
 
 ### v0.5.0 — Tokenizer dependency migration (swift-transformers → swift-tokenizers)
 
@@ -103,9 +116,9 @@ Documentation:
 
 ## Dependencies
 
-- `mlx-swift` -- Apple's MLX framework for Swift
-- `swift-transformers` -- Tokenizer support
-- `SwiftAcervo` -- Model registry and download management
+- `mlx-swift` (≥ 0.31.3) -- Apple's MLX framework for Swift
+- `swift-tokenizers` (≥ 0.4.2, `Swift` trait) -- Tokenizer support (`Tokenizers` product only)
+- `SwiftAcervo` (≥ 0.8.3) -- Model registry, CDN download, integrity verification
 
 ## Platform Requirements
 

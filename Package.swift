@@ -24,7 +24,7 @@ let package = Package(
       url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.8.3")),
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMajor(from: "0.3.2"), traits: ["Swift"]),
+      .upToNextMajor(from: "0.4.2"), traits: ["Swift"]),
   ],
   targets: [
     .target(
