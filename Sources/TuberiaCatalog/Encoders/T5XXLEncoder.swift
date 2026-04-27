@@ -45,33 +45,19 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     // load phase (Option B from INF-2: separate async step, keeping init synchronous).
   }
 
-  /// Load the T5 tokenizer from the Acervo component directory.
+  /// Returns the tokenizer's root directory from the Acervo component.
   ///
-  /// Must be called during the pipeline load phase (e.g. from
-  /// `DiffusionPipeline.loadModels()`) before any `encode()` calls that require
-  /// real tokenization. Falls back to placeholder tokenization if not called.
-  ///
-  /// The tokenizer files (`tokenizer.json`, `tokenizer_config.json`) are bundled
-  /// in the same Acervo component as the weights (component ID configured via
-  /// `configuration.componentId`). Uses SwiftAcervo v2 `withComponentAccess` API
-  /// to ensure integrity verification and abstract storage location.
+  /// Precondition: the component must already be ready on disk before this method
+  /// is called. `DiffusionPipeline.loadModels()` calls `ensureComponentReady` and
+  /// satisfies this precondition.
   public func loadTokenizer() async {
     do {
-      // Step 1: Access the component via SwiftAcervo v2 API to resolve tokenizer location.
-      // The ComponentHandle abstracts the storage location and applies integrity checks.
       let tokenizerDir = try await AcervoManager.shared.withComponentAccess(
         configuration.componentId
       ) { handle -> URL in
-        // Step 2: Resolve the tokenizer.json file via the component handle.
-        // This ensures we only access files declared in the ComponentDescriptor.
-        let tokenizerURL = try handle.url(matching: "tokenizer.json")
-        print("[T5XXLEncoder] Located tokenizer at: \(tokenizerURL.path)")
-
-        // Return the directory containing the tokenizer (needed by AutoTokenizer.from)
-        return tokenizerURL.deletingLastPathComponent()
+        return handle.rootDirectoryURL
       }
 
-      // Step 3: Load the tokenizer asynchronously using swift-tokenizers' AutoTokenizer.
       let loadedTokenizer = try await AutoTokenizer.from(directory: tokenizerDir)
       self.tokenizer = loadedTokenizer
     } catch {

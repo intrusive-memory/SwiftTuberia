@@ -1,17 +1,14 @@
 ---
-feature_name: OPERATION RIVETED PIPEWORK
-mission_branch: mission/riveted-pipework/01
-starting_point_commit: dcc1eec00e96125c18596b110cd73974e338ff4b
-iteration: 1
+feature_name: OPERATION VANISHING MANIFEST
+starting_point_commit: 36887b979810af7ee30d5f8fdd49d6322c52b656
+mission_branch: mission/vanishing-manifest/02
+iteration: 2
+prior_briefs:
+  - docs/complete/vanishing-manifest-01-brief.md
+  - docs/complete/vanishing-manifest-02-brief.md
 ---
 
-# EXECUTION_PLAN.md — SwiftTuberia SwiftAcervo v2 Integration
-
-**Source**: `REQUIREMENTS.md` (2026-04-20)
-**Mission**: Complete SwiftTuberia's migration from SwiftAcervo v1 partial-registration integration to complete v2 abstracted-access integration with SHA-256 integrity verification and standardized CDN workflows.
-**Refined**: 2026-04-20 — all 4 passes applied (atomicity, priority, parallelism, open questions).
-
----
+# EXECUTION_PLAN.md — SwiftTuberia SwiftAcervo V2 Compliance (Iteration 02)
 
 ## Terminology
 
@@ -23,302 +20,309 @@ iteration: 1
 
 ---
 
-## Mission Context
+## Overview
 
-- **Upstream API**: `/Users/stovak/Projects/SwiftAcervo/API_REFERENCE.md`
-- **Audit**: `AUDIT_FINDINGS.md` (Sorties T1–T5)
-- **Architecture**: `requirements/` and `architecture/` (PROTOCOLS, PIPELINE, CATALOG, INFRASTRUCTURE, TESTING)
-- **Verified external assumptions** (during refinement):
-  - SwiftAcervo 0.7.2 ships the internal `withComponentAccess(_:in:perform:)` overload at `Sources/SwiftAcervo/AcervoManager.swift:455` (used by Sortie 6).
-  - Only one production type conforms to `PipelineRecipe`: `MockPipelineRecipe` under `Tests/TuberiaGPUTests/Mocks/` — scopes Sortie 5's "update any recipe" task.
+**Goal**: SwiftTuberia never deals with files. Acervo provides all model access.
 
-Status items 1–5 and 13 from the requirements Status Snapshot are ✅ DONE. This plan covers the remaining ❌ OPEN and ⚠️ PARTIAL items (rows 6–12).
+All 8 requirements from `requirements/ACERVO_V2_COMPLIANCE.md` are addressed across two repos:
+- **SwiftAcervo** (`../SwiftAcervo`): API surface additions that SwiftTuberia depends on
+- **SwiftTuberia** (`.`): Compliance changes consuming those APIs
+
+Requirements TUBERIA-V2-01, V2-02, V2-03 and ACERVO-V2-01 are independent and run in Layer 1 (all builds on supervising agent; ACERVO-V2-01 release on sub-agent in parallel with Tuberia-S1/S2).
+TUBERIA-V2-04 is blocked by SwiftAcervo v0.8.3 being released and runs in Layer 2.
+ACERVO-V2-02 is optional and runs last.
+
+---
+
+## Iteration 02 Carry-Forward Lessons
+
+These rules come from the iteration 01 briefs (`docs/complete/vanishing-manifest-01-brief.md`, `vanishing-manifest-02-brief.md`). They modify how iteration 02 sorties run; the work-unit structure is unchanged.
+
+### Universal Exit Criteria (apply to EVERY code sortie below)
+
+In addition to each sortie's specific exit criteria, the following must hold before the supervisor marks the sortie COMPLETED:
+
+- **U1. Per-sortie commit gate.** Exactly one new commit on `mission/vanishing-manifest/02` since the previous sortie completed. Commit subject matches the pattern `<WorkUnit>-<SortieID>: <one-line summary>` (e.g. `Tuberia-S1: bare descriptors + deprecate ensureComponentReady`). Verified via `git log -1 --format=%s`.
+- **U2. Clean working tree.** `git status --porcelain` lists only paths the sortie's tasks were authorized to touch. Stray edits (e.g. unrelated file deletions, IDE artifacts) fail the sortie.
+- **U3. No iteration 01 regressions.** Files Tuberia-S1 and Tuberia-S2 cleaned up in iteration 01 (`ComponentFile`, `findSafetensorsFiles`, `canEnumerateDirectory`, string-inspection error handling) are not reintroduced. Verified via the same greps as the original sorties.
+
+### Universal Entry Criteria (apply to release-class sorties)
+
+Any sortie that uses `gh`, `git push`, or any credentialed external service must verify:
+
+- **U4. Live credentials.** `gh auth status` exits 0 AND `git -C <repo> push --dry-run origin <branch>` exits 0 BEFORE the sortie does any version bump, commit, or other irreversible work. If either check fails, halt with state PARTIAL and surface the credential issue. Do not bump versions, do not commit — leave the repo clean for the human to fix the auth and resume.
+
+### Trigger Conditions for Resume from PARTIAL
+
+If a sortie enters PARTIAL with a human-action blocker (e.g. expired auth), record a **trigger condition** in `SUPERVISOR_STATE.md`. On every subsequent `/mission-supervisor status` or `resume`, the supervisor checks the trigger condition. If satisfied, surface "READY TO RESUME" prominently. This prevents iteration-01's silent-abandonment failure mode.
+
+Example trigger conditions:
+- Acervo-S2 `gh` auth: `gh auth status` exits 0
+- Network-dependent sortie: `curl -sI <endpoint> | head -1` returns 200/300-class
+
+### Model Selection Refinement
+
+- **Sonnet-minimum for public-artifact sorties.** Any sortie that creates an irreversible public artifact (git tag pushed to origin, GitHub release, npm publish, App Store submit) is sonnet-minimum regardless of code complexity. The 10x cost vs haiku is dwarfed by the cost of a wrong public release.
+- **Iteration 01's Acervo-S2 was haiku — iteration 02 raises it to sonnet** (see Sortie 2 below).
 
 ---
 
 ## Work Units
 
 | Work Unit | Directory | Sorties | Layer | Dependencies |
-|-----------|-----------|---------|-------|--------------|
-| SwiftTuberia-v2 | `.` (project root) | 8 | 1–4 | none |
-
-Single-project mission. All sorties operate on the SwiftTuberia repo with intra-sortie dependencies tracked below.
-
----
-
-## Sortie Dependency Graph
-
-| Sortie | ID | Layer | Priority | Hard Dependencies | Notes |
-|--------|----|-------|----------|-------------------|-------|
-| 1 | REQ-T5 | 1 | 24.5 | none | `Package.swift` only — unblocks fresh-clone builds |
-| 2 | REQ-T4 | 1 | 14.5 | none | `CatalogRegistration.swift` only; foundation for S6/S7 |
-| 3 | REQ-PIPE-01 | 1 | 14.0 | none | `DiffusionPipeline.swift`; foundation for S4/S5 |
-| 4 | REQ-PIPE-02 | 2 | 6.0 | S3 (REQ-PIPE-01) | same file as S3/S5 — must serialize |
-| 5 | REQ-PIPE-03 | 2 | 6.5 | S3 (REQ-PIPE-01) | same file as S3/S4 — must serialize |
-| 6 | REQ-INT-01 | 2 | 6.5 | S2 (REQ-T4) | needs populated checksums; new files only |
-| 7 | REQ-CDN-01 | 2 | 7.0 | S2 (REQ-T4) | needs populated checksums; CI + helper |
-| 8 | REQ-DOC-01 | 4 | 2.0 | S1–S7 | documentation sweep |
-
-**Priority formula**: `(dep_depth × 3) + (foundation × 2) + (risk × 1) + (complexity × 0.5)`. Higher = earlier.
+|-----------|-----------|---------|-------|-------------|
+| SwiftAcervo | `../SwiftAcervo` | 3 (S3 optional) | 1–2 | S2 ← S1; S3 ← S1 (optional) |
+| SwiftTuberia | `.` | 3 | 1–2 | S3 ← SwiftAcervo-S2 (release), S3 ← S1, S3 ← S2 |
 
 ---
 
 ## Parallelism Structure
 
-**Critical path**: S3 → S5 → S8 (length: 3 sorties). Mirrored by S2 → S6 → S8 and S3 → S4 → S8.
+**Critical Path**: SwiftAcervo-S1 → SwiftTuberia-S1 → SwiftTuberia-S2 → SwiftTuberia-S3 (4 sorties; supervising agent — Tuberia-S1/S2 have no data dependency on Acervo-S1 but serialize behind it on the supervising agent queue)
 
-**Parallel execution groups**:
+**Parallel Execution Groups**:
+- **Group 1** (supervising agent only):
+  - SwiftAcervo-S1 — Add rootDirectoryURL (build in `../SwiftAcervo`) — **SUPERVISING AGENT ONLY**
+- **Group 2** (parallel after Group 1 completes):
+  - SwiftAcervo-S2 — Release v0.8.3 (no build: git/gh ops only) — **Sub-agent (Agent 2)**
+  - SwiftTuberia-S1 — Bare descriptors (build in `.`) — **SUPERVISING AGENT ONLY**
+- **Group 3** (supervising agent, after SwiftTuberia-S1; sub-agent Group 2 likely done by now):
+  - SwiftTuberia-S2 — Dead code removal (build in `.`) — **SUPERVISING AGENT ONLY**
+- **Group 4** (after both Group 2 chains are verified complete):
+  - SwiftTuberia-S3 — rootDirectoryURL + docstring (build in `.`) — **SUPERVISING AGENT ONLY**
+- **Group 5** (optional, any time after Group 1):
+  - SwiftAcervo-S3 — estimatedSizeBytes hint (build in `../SwiftAcervo`) — **SUPERVISING AGENT ONLY**
 
-- **Group A (Layer 1 — fully parallel)**: S1, S2, S3 — independent files, no inter-dependencies.
-  - S1 edits `Package.swift` + `AGENTS.md`.
-  - S2 edits `CatalogRegistration.swift` + `CatalogRegistrationTests`.
-  - S3 edits `DiffusionPipeline.swift` + pipeline tests.
-- **Group B (Layer 2 — partial parallel)**: after Group A completes.
-  - **Sub-group B1 (serialized on `DiffusionPipeline.swift`)**: S4 → S5 (or S5 → S4).
-  - **Sub-group B2 (parallel with B1)**: S6 (new test files), S7 (CI workflow + new tool).
-- **Group C (Layer 4 — sequential)**: S8 after everything else.
+**Agent Constraints**:
+- **Supervising agent**: Handles ALL sorties with build steps (all SwiftAcervo and SwiftTuberia build sorties). Serial within each repo to avoid xcodebuild conflicts.
+- **Sub-agent (Agent 2)**: SwiftAcervo-S2 release only (no build; git tag + gh release ops). Runs concurrently with Group 2 supervising work.
 
-**Agent allocation**:
-
-| Agent | Role | Handles |
-|-------|------|---------|
-| Supervising agent | All sorties with `xcodebuild` verification | S1, S2, S3, S4, S5, S6 |
-| Sub-agent 1 | No-build file authoring | S7 workflow/helper authoring (supervisor runs the local verify) |
-| Sub-agent 2 | Pure documentation | S8 |
-
-**Build constraint**: Every sortie whose exit criteria invoke `xcodebuild build`/`xcodebuild test` is **supervising-agent-only**. Sub-agents may prepare code for S7/S8 but must NOT run builds.
-
-**Maximum concurrency**: 3 agents in Group A (1 supervising sequential through S1→S2→S3, or supervising on one + sub-agents on non-build portions). Realistic throughput: supervising agent drives the serial build chain; sub-agents prep S7/S8 artifacts in parallel during Layer 2.
+**Missed Opportunities**:
+- SwiftAcervo-S1 and SwiftTuberia-S1/S2 could theoretically run on separate agents (different repos, no shared build artifacts) but the "no build on sub-agents" constraint prevents this. All build sorties serialize on the supervising agent.
 
 ---
 
-### Sortie 1: REQ-T5 — Bump `SwiftAcervo` Minimum Floor in `Package.swift`
+## Work Unit: SwiftAcervo
 
-**Priority**: 24.5 — highest foundation (7 sorties depend on v2 API; fresh-clone correctness).
+### Sortie 1: Add rootDirectoryURL to ComponentHandle
+
+**Priority**: 7.5 — Foundational: unblocks SwiftAcervo-S2 (release) which gates SwiftTuberia-S3; establishes new public API surface; highest dependency depth in the mission.
+
+**Model**: sonnet (public API surface — see iteration 01 lesson on model selection).
 
 **Entry criteria**:
-- [ ] First-layer sortie — no prerequisites.
-- [ ] `Package.resolved` currently pins `SwiftAcervo` at `0.7.2`.
-- [ ] `Package.swift:23` currently reads `.package(..., from: "0.5.6")`.
+- [ ] First sortie for SwiftAcervo — no prerequisites
+- [ ] `../SwiftAcervo/Sources/SwiftAcervo/ComponentHandle.swift` is readable
+- [ ] `git -C ../SwiftAcervo status --porcelain` is empty (clean working tree before starting)
 
 **Tasks**:
-1. Edit `Package.swift:23` — change `from: "0.5.6"` to `from: "0.7.2"` (smallest SwiftAcervo version exposing v2 API: `withComponentAccess`, `ComponentFile.sha256`, `ComponentHandle`, `Acervo.register`, `Acervo.ensureComponentReady`, `AcervoError.integrityCheckFailed`).
-2. Run `xcodebuild -resolvePackageDependencies -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` and commit any resulting update to `Package.resolved`.
-3. Reconcile `AGENTS.md` v0.3.0 changelog entry. **Chosen strategy**: add a **new** changelog entry documenting the floor bump to 0.7.2 (preserves history; do not silently rewrite 0.6.0). Reference this sortie ID (REQ-T5).
+1. Open `ComponentHandle.swift` and locate `internal var baseDirectory: URL` (or equivalent internal property)
+2. Add `public var rootDirectoryURL: URL { baseDirectory }` immediately after it
+3. Verify `LocalHandle` has a matching accessor (expected: `public let rootURL: URL`) — document any naming mismatch in a comment if found
+4. Run `xcodebuild test -scheme SwiftAcervo-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO` from `../SwiftAcervo`
+5. Commit on `../SwiftAcervo` `development`: subject `Acervo-S1: add public rootDirectoryURL accessor on ComponentHandle`. (Do NOT push — push happens in S2.)
 
 **Exit criteria**:
-- [ ] `grep -E '"SwiftAcervo.*from: "0\.(7\.[2-9]|[89]\.|\d{2,})' Package.swift` returns a match (version ≥ 0.7.2).
-- [ ] `rm -rf .build && xcodebuild -resolvePackageDependencies -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` succeeds; `grep 'version" : "0\.(7\.[2-9]|[89]\.|[1-9]\d' Package.resolved` returns a match.
-- [ ] `xcodebuild build -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0.
-- [ ] `AGENTS.md` contains a new changelog entry (NOT an edit of v0.3.0) mentioning `SwiftAcervo` and `0.7.2` (or higher): `grep -c 'SwiftAcervo.*0\.7\.2' AGENTS.md` ≥ 1.
+- [ ] `grep -n 'public var rootDirectoryURL' ../SwiftAcervo/Sources/SwiftAcervo/ComponentHandle.swift` returns 1 match
+- [ ] `xcodebuild test` exits 0 (all existing ComponentHandle tests pass)
+- [ ] No other files in SwiftAcervo are modified
+- [ ] U1: `git -C ../SwiftAcervo log -1 --format=%s` matches `^Acervo-S1: `
+- [ ] U2: `git -C ../SwiftAcervo status --porcelain` is empty
 
 ---
 
-### Sortie 2: REQ-T4 — Populate SHA-256 Checksums on All Catalog Descriptors
+### Sortie 2: Commit, push, and release SwiftAcervo v0.8.3
 
-**Priority**: 14.5 — second-highest foundation (blocks S6 integrity tests and S7 CDN verification).
+**Priority**: 7.0 — Critical-path blocker: SwiftTuberia-S3 cannot call `xcodebuild -resolvePackageDependencies` until a ≥0.8.3 tag exists on `intrusive-memory/SwiftAcervo`. No build step — runs on sub-agent concurrently with SwiftTuberia-S1/S2.
+
+**Model**: **sonnet** (public release artifact — iteration 01 lesson). Iteration 01 used haiku and the cost asymmetry was wrong: a haiku saving on a release sortie risks a bad public tag.
 
 **Entry criteria**:
-- [ ] First-layer sortie — no prerequisites (v2 API already available via `Package.resolved` 0.7.2).
-- [ ] `Sources/TuberiaCatalog/Registration/CatalogRegistration.swift:12-38` currently contains 6 `ComponentFile(relativePath:)` entries with `sha256 = nil` and `expectedSizeBytes = nil`.
+- [ ] SwiftAcervo-S1 is COMPLETED (`rootDirectoryURL` added and all tests passing)
+- [ ] `git -C ../SwiftAcervo status --porcelain` is empty
+- [ ] **U4 (live credentials)**: `gh auth status` exits 0
+- [ ] **U4 (live credentials)**: `git -C ../SwiftAcervo push --dry-run origin development` exits 0
+- [ ] If U4 fails: HALT, set sortie state PARTIAL with trigger condition `gh auth status` exits 0, and do NOT bump versions or commit. Surface the auth issue to the user.
 
 **Tasks**:
-1. Pull canonical MLX artifacts from the CDN for each component (same slugs as `.github/workflows/ensure-model-cdn.yml`):
-   - `intrusive-memory_t5-xxl-int4-mlx/`: `config.json`, `tokenizer.json`, `tokenizer_config.json`, `model.safetensors`
-   - `intrusive-memory_sdxl-vae-fp16-mlx/`: `config.json`, `model.safetensors`
-2. Compute SHA-256 digests with `shasum -a 256 <file>` and sizes with `stat -f%z <file>`. Record results in a scratch file.
-3. Rewrite every `ComponentFile(...)` entry in `CatalogRegistration.swift:12-38` to pass `ComponentFile(relativePath: …, expectedSizeBytes: <bytes>, sha256: "<64-char lowercase hex>")`.
-4. Extend `Tests/TuberiaCatalogTests/CatalogRegistrationTests.swift` (or add a new file under the same target) with a test suite asserting for every registered `ComponentFile`: `sha256` is non-nil, `expectedSizeBytes > 0`, and `sha256` matches `^[0-9a-f]{64}$`.
+1. From `../SwiftAcervo`, run `/ship-swift-library` (or equivalent: bump version to 0.8.3, commit, push `development` to `main`, create and push tag v0.8.3, create GitHub release)
+2. Verify the GitHub release is published: `gh release view v0.8.3 --repo intrusive-memory/SwiftAcervo`
 
 **Exit criteria**:
-- [ ] Every `ComponentFile` entry contains both keywords: `grep -cE 'sha256: *"[0-9a-f]{64}"' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns `6` (one per file across both components).
-- [ ] `grep -cE 'expectedSizeBytes: *[0-9]+' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns `6`.
-- [ ] Zero `ComponentFile` entries omit either argument: `grep -nE 'ComponentFile\([^)]*\)' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift | grep -v 'sha256:' | wc -l | tr -d ' '` returns `0`.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0, including the new assertion suite.
+- [ ] `git -C ../SwiftAcervo tag -l 'v0.8.3'` returns `v0.8.3`
+- [ ] `gh release view v0.8.3 --repo intrusive-memory/SwiftAcervo` exits 0
+- [ ] `git -C ../SwiftAcervo ls-remote --tags origin v0.8.3` returns a non-empty line (tag is on origin, not just local)
+- [ ] U2: `git -C ../SwiftAcervo status --porcelain` is empty
 
 ---
 
-### Sortie 3: REQ-PIPE-01 — Call `Acervo.ensureComponentReady(_:)` Before Weight Loading
+### Sortie 3: Allow estimatedSizeBytes hint on bare ComponentDescriptor [OPTIONAL]
 
-**Priority**: 14.0 — foundation for S4/S5 (all edit the same file); unblocks correct first-run behavior.
+**Priority**: 1.25 — Optional; no other sortie depends on this; zero dependency depth; low risk.
+
+**Model**: haiku (mechanical, well-scoped).
 
 **Entry criteria**:
-- [ ] First-layer sortie — no prerequisites.
-- [ ] `Sources/Tuberia/Pipeline/DiffusionPipeline.swift:173-217` `loadModels(progress:)` does not currently call `Acervo.ensureComponentReady`.
+- [ ] SwiftAcervo-S1 is COMPLETED (rootDirectoryURL shipped)
+- [ ] `../SwiftAcervo/Sources/SwiftAcervo/ComponentDescriptor.swift` is readable
+- [ ] `git -C ../SwiftAcervo status --porcelain` is empty
 
 **Tasks**:
-1. In `loadModels(progress:)` `for segment…` loop, for each weighted segment with a non-nil `componentId`, call `try await Acervo.ensureComponentReady(componentId, progress: …)` **before** invoking `WeightLoader.load`.
-2. Thread the existing `(Double, String)` progress callback through the `Acervo.ensureComponentReady` progress closure so download phases emit progress instead of a frozen bar.
-3. **Chosen strategy for progress reporting**: fold download progress into the existing `progress(loadedCount/totalSegments, componentName)` tick stream — do **not** add a new `PipelineProgress` case (keeps the public enum stable; S8 does not need to document a new API). Inline-comment why.
-4. Add a unit test (`Tests/TuberiaTests/PipelineLoadModelsTests.swift` or extension to an existing file) that verifies `ensureComponentReady` is invoked. Approach: inject a test double for the Acervo entry point via an existing seam if one exists, or expose a protocol-backed seam in this sortie. Cover both paths: not-on-disk (triggers download) and cached (no network).
+1. Locate the bare `ComponentDescriptor` initializer (the one without a `files:` parameter)
+2. Add `estimatedSizeBytes: Int64? = nil` as an optional parameter
+3. Store the value in `self._estimatedSizeBytes` (or the property that backs `estimatedSizeBytes`)
+4. Ensure the `estimatedSizeBytes` computed property returns the hint before hydration, manifest sum after
+5. Run `xcodebuild test -scheme SwiftAcervo-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO`
+6. Commit on `../SwiftAcervo` `development`: subject `Acervo-S3: estimatedSizeBytes hint on bare ComponentDescriptor`.
 
 **Exit criteria**:
-- [ ] `grep -n 'ensureComponentReady' Sources/Tuberia/Pipeline/DiffusionPipeline.swift` returns ≥ 1 match inside the `loadModels(progress:)` function.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0.
-- [ ] New test file exists and asserts `ensureComponentReady` is called once per weighted segment with a non-nil `componentId`: `grep -r 'ensureComponentReady' Tests/` returns ≥ 1 match.
-- [ ] `grep -n 'PipelineProgress' Sources/Tuberia/Pipeline/PipelineProgress.swift` shows no new cases added (public enum unchanged).
+- [ ] `grep -n 'estimatedSizeBytes.*Int64.*nil' ../SwiftAcervo/Sources/SwiftAcervo/ComponentDescriptor.swift` returns ≥ 1 match
+- [ ] `xcodebuild test` exits 0
+- [ ] Existing full-initializer behavior is unchanged (covered by `xcodebuild test` above)
+- [ ] U1: `git -C ../SwiftAcervo log -1 --format=%s` matches `^Acervo-S3: `
+- [ ] U2: `git -C ../SwiftAcervo status --porcelain` is empty
 
 ---
 
-### Sortie 4: REQ-PIPE-02 — Wire `MemoryManager.hardValidate()` Into the Load Path
+## Work Unit: SwiftTuberia
 
-**Priority**: 6.0 — quality gate; depends on S3 for file serialization.
+### Sortie 1: Bare descriptors + deprecation in CatalogRegistration.swift
+
+**Priority**: 5.75 — Dependency depth 1 (SwiftTuberia-S3 entry criterion requires S1 completed); medium risk (removes live code with test coverage).
+
+**Model**: sonnet.
 
 **Entry criteria**:
-- [ ] REQ-PIPE-01 (Sortie 3) is COMPLETE — serializes edits to `DiffusionPipeline.swift`.
-- [ ] `Sources/Tuberia/Infrastructure/MemoryManager.swift:81-99` declares `softCheck` and `hardValidate` but no production call site exists.
+- [ ] First sortie for SwiftTuberia — no prerequisites
+- [ ] `Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` is readable
+- [ ] `git status --porcelain` is empty
 
 **Tasks**:
-1. At entry to `loadModels(progress:)` in `DiffusionPipeline.swift:173-217`, compute peak memory requirement from `_memoryRequirement.peakMemoryBytes` and call `await MemoryManager.shared.hardValidate(requiredBytes: peak)`.
-2. Define a pipeline-specific error variant `PipelineError.insufficientMemory(required: UInt64, available: UInt64)` in `Sources/Tuberia/Pipeline/PipelineError.swift`, and wrap any memory-manager error thrown from `hardValidate` in this variant at the call site.
-3. **Chosen strategy**: single up-front `hardValidate(peakMemoryBytes)`. Phased-loading with `softCheck` is deferred (noted in Open Questions). Inline-comment the decision and reference this sortie.
-4. Update `requirements/INFRASTRUCTURE.md:154-218` "Audit Checklist" to match the realized single-gate design (remove any phased-load claims; add `PipelineError.insufficientMemory` to the error table).
-5. Add a unit test in `Tests/TuberiaTests/MemoryGuardTests.swift` that injects a stub `MemoryManager` (or overrides `availableMemory` for the test) with availability below `peakMemoryBytes` and asserts the pipeline throws `PipelineError.insufficientMemory` from `loadModels(progress:)`.
+1. Delete the `t5XXLEncoderRequiredFiles` array literal (lines ~14–23 per requirements)
+2. Delete the `sdxlVAEDecoderRequiredFiles` array literal
+3. Replace the `t5XXLEncoderComponentDescriptor` full initializer with the bare initializer form (keeping `id`, `type`, `displayName`, `repoId`, `minimumMemoryBytes`, `metadata`; removing `files:` and `estimatedSizeBytes:`)
+4. Replace the `sdxlVAEDecoderComponentDescriptor` full initializer with bare form
+5. Add `@available(*, deprecated, message: "Use ComponentReadinessService (with progress) or Acervo.ensureComponentReady directly.")` to `CatalogRegistration.ensureComponentReady(_:)` (line ~139)
+6. Run `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO`
+7. Commit: subject `Tuberia-S1: bare ComponentDescriptors + deprecate ensureComponentReady`. Touched files only: `Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` and `Tests/TuberiaCatalogTests/CatalogRegistrationTests.swift` (if test updates are needed).
 
 **Exit criteria**:
-- [ ] `grep -nE 'hardValidate|MemoryManager\.shared' Sources/Tuberia/Pipeline/DiffusionPipeline.swift` returns ≥ 1 match inside `loadModels(progress:)`.
-- [ ] `grep -nE 'case insufficientMemory' Sources/Tuberia/Pipeline/PipelineError.swift` returns a match.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0.
-- [ ] New unit test file `Tests/TuberiaTests/MemoryGuardTests.swift` exists and references `PipelineError.insufficientMemory`: `grep -l 'insufficientMemory' Tests/TuberiaTests/MemoryGuardTests.swift` returns the file path.
-- [ ] `grep -n 'insufficientMemory\|hardValidate' requirements/INFRASTRUCTURE.md` returns ≥ 1 match.
+- [ ] `grep -c 'ComponentFile(' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns `0`
+- [ ] `grep -c 'sha256:' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns `0`
+- [ ] `grep -c 'files:' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns `0`
+- [ ] `grep -n '@available.*deprecated' Sources/TuberiaCatalog/Registration/CatalogRegistration.swift` returns 1 match on the `ensureComponentReady` method
+- [ ] `xcodebuild test` exits 0
+- [ ] U1: `git log -1 --format=%s` matches `^Tuberia-S1: `
+- [ ] U2: `git status --porcelain` is empty (no stray edits)
 
 ---
 
-### Sortie 5: REQ-PIPE-03 — Replace Positional `findComponentId(for:)` With Recipe Role Map
+### Sortie 2: Dead code removal + typed error handling in WeightLoader.swift
 
-**Priority**: 6.5 — latent-bug fix; depends on S3 for file serialization.
+**Priority**: 5.75 — Dependency depth 1 (SwiftTuberia-S3 entry criterion requires S2 completed); higher risk than S1 (error handling refactor touches runtime behavior paths).
+
+**Model**: sonnet.
 
 **Entry criteria**:
-- [ ] REQ-PIPE-01 (Sortie 3) is COMPLETE — serializes edits to `DiffusionPipeline.swift`.
-- [ ] `Sources/Tuberia/Pipeline/DiffusionPipeline.swift:515-530` `findComponentId(for:)` still indexes `_allComponentIds` by hard-coded positional convention `[0]=encoder, [1]=backbone, [2]=decoder`.
-- [ ] Only one production/test type conforms to `PipelineRecipe`: `Tests/TuberiaGPUTests/Mocks/MockPipelineRecipe.swift:10` — that is the only recipe to update.
+- [ ] First sortie for this file — no prerequisites
+- [ ] `Sources/Tuberia/Infrastructure/WeightLoader.swift` is readable
+- [ ] Read `../SwiftAcervo/Sources/SwiftAcervo/AcervoError.swift` (or search `../SwiftAcervo` for `enum AcervoError`) to confirm exact case names before writing pattern-match code. **Iteration 01 lesson:** enumerate every typed-error case first; do NOT trust the old string-match to cover them. (`integrityCheckFailed` had no string match in iteration 01 — easy to miss.)
+- [ ] `git status --porcelain` is empty
 
 **Tasks**:
-1. Add `var componentIdFor: [PipelineRole: String] { get }` to `PipelineRecipe` in `Sources/Tuberia/Pipeline/PipelineRecipe.swift`. Provide a protocol-extension default implementation derived from zipping `allComponentIds` with `PipelineRole.allCases` iteration order — preserves today's positional convention for any conformer that doesn't override.
-2. Replace `_allComponentIds: [String]` on `DiffusionPipeline` with `_componentIdByRole: [PipelineRole: String]`. Update the initializer that populates it to read `recipe.componentIdFor`.
-3. Rewrite `findComponentId(for:)` as a dictionary lookup keyed by `PipelineRole`. Delete the positional indexing.
-4. Update `Tests/TuberiaGPUTests/Mocks/MockPipelineRecipe.swift` to expose a `componentIdFor` override surface (default inherited is fine, but tests need to override).
-5. Add a `PipelineAssemblyTests` case (existing file under `Tests/TuberiaTests/` or new `Tests/TuberiaTests/RecipeRoleMapTests.swift`) that builds a `MockPipelineRecipe` whose `componentIdFor` map is **reversed** relative to `allComponentIds` default, and asserts each segment loads its own weights (not its neighbor's) by observing which `componentId` strings reach the stubbed loader.
+1. Delete the `canEnumerateDirectory(_:)` method body (approximately lines 168–177)
+2. Delete the `findSafetensorsFiles(in:)` method body (approximately lines 187–239)
+3. Verify no callers exist: `grep -rn 'canEnumerateDirectory\|findSafetensorsFiles' Sources/` must return 0
+4. In `WeightLoader.load()`, replace the string-inspection catch block (lines ~98–108) with typed `AcervoError` pattern matching: catch `componentNotDownloaded`, `componentNotRegistered`, `componentNotHydrated` → rethrow as `PipelineError.modelNotDownloaded`; catch `integrityCheckFailed` → rethrow as `PipelineError.weightLoadingFailed` with detail; re-catch `PipelineError` passthrough; fallback catch
+5. Apply the same typed pattern matching to `loadFromPath()`'s catch block (lines ~151–158)
+6. Run `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO`
+7. Commit: subject `Tuberia-S2: typed AcervoError handling + dead-code removal in WeightLoader`. Touched files only: `Sources/Tuberia/Infrastructure/WeightLoader.swift`.
 
 **Exit criteria**:
-- [ ] `grep -n '_allComponentIds' Sources/Tuberia/Pipeline/DiffusionPipeline.swift` returns 0 matches.
-- [ ] `grep -nE '\[0\]|\[1\]|\[2\]' Sources/Tuberia/Pipeline/DiffusionPipeline.swift` shows no positional indexing inside `findComponentId`.
-- [ ] `grep -n 'componentIdFor' Sources/Tuberia/Pipeline/PipelineRecipe.swift` returns ≥ 1 match (protocol requirement + default).
-- [ ] New reversed-order recipe test exists: `grep -rn 'reversed\|componentIdFor' Tests/TuberiaTests/` returns ≥ 1 match in a test file.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0.
+- [ ] `grep -n 'findSafetensorsFiles\|canEnumerateDirectory\|FileManager' Sources/Tuberia/Infrastructure/WeightLoader.swift` returns 0 matches
+- [ ] `grep -n 'contains("Not\|contains("not\|contains("invalid' Sources/Tuberia/Infrastructure/WeightLoader.swift` returns 0 matches
+- [ ] `grep -n 'AcervoError\.' Sources/Tuberia/Infrastructure/WeightLoader.swift` returns ≥ 3 matches
+- [ ] `xcodebuild test` exits 0
+- [ ] U1: `git log -1 --format=%s` matches `^Tuberia-S2: `
+- [ ] U2: `git status --porcelain` is empty
 
 ---
 
-### Sortie 6: REQ-INT-01 — End-to-End `withComponentAccess` Integration Tests
+### Sortie 3: rootDirectoryURL + precondition docstring in T5XXLEncoder.swift
 
-**Priority**: 6.5 — closes integrity-path coverage gap; depends on S2.
+**Priority**: 2.5 — Blocked by SwiftAcervo-S2 (release) and SwiftTuberia-S1/S2; integrating sortie that closes the mission.
+
+**Model**: sonnet (closes the mission; integration risk).
 
 **Entry criteria**:
-- [ ] REQ-T4 (Sortie 2) is COMPLETE — production descriptors have SHA-256 checksums.
-- [ ] No existing test exercises `AcervoManager.withComponentAccess`, `WeightLoader.load`, or integrity failure paths: `grep -r 'withComponentAccess' Tests/ | wc -l` returns 0.
+- [ ] SwiftAcervo-S2 is COMPLETED (v0.8.3 released and tag pushed to `intrusive-memory/SwiftAcervo`)
+- [ ] SwiftTuberia-S1 is COMPLETED
+- [ ] SwiftTuberia-S2 is COMPLETED
+- [ ] `Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` is readable
+- [ ] `git status --porcelain` is empty
 
 **Tasks**:
-1. Create `Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift`. Implement the **happy path** test: stage a temp App Group directory with a synthetic `.safetensors` file whose SHA-256 matches a test-only `ComponentDescriptor`, invoke `WeightLoader.load(componentId:…)` via the internal `withComponentAccess(_:in:perform:)` overload (verified available at `SwiftAcervo/Sources/SwiftAcervo/AcervoManager.swift:455`), assert `ModuleParameters` contains the expected key.
-2. In `Tests/TuberiaCatalogTests/ComponentIntegrityTests.swift`, implement the **integrity failure** test: stage the same directory but corrupt a single byte in the safetensors file, assert load throws `AcervoError.integrityCheckFailed` (propagated as `PipelineError.weightLoadingFailed`).
-3. Implement the **not-downloaded failure** test (in `WeightLoaderIntegrationTests.swift`): register a descriptor but stage no files, assert `PipelineError.modelNotDownloaded`.
-4. Implement the **LoRA `withLocalAccess`** test (in `WeightLoaderIntegrationTests.swift`): stage a bare safetensors file on disk, call `LoRALoader.loadAdapterWeights(config: .init(localPath: url.path, …))`, assert non-empty params.
-5. Verify all new tests honor `TESTING.md` rules: no real CDN weights, no network, no timed waits, use small synthetic tensors (< 1 MB each).
+1. Run `xcodebuild -resolvePackageDependencies -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` to pull SwiftAcervo ≥ 0.8.3 — verify `grep -A3 '"SwiftAcervo"' Package.resolved` shows version ≥ 0.8.3
+2. In `T5XXLEncoder.loadTokenizer()` (lines ~67–72): replace `let tokenizerURL = try handle.url(matching: "tokenizer.json"); return tokenizerURL.deletingLastPathComponent()` with `return handle.rootDirectoryURL`
+3. Add precondition docstring to `loadTokenizer()`: must mention "ensureComponentReady" and "precondition" and note that `DiffusionPipeline.loadModels()` satisfies the precondition
+4. Run `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO`
+5. Commit: subject `Tuberia-S3: T5XXLEncoder uses rootDirectoryURL + precondition docstring`. Touched files: `Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` and `Package.resolved` (the SwiftAcervo bump).
 
 **Exit criteria**:
-- [ ] `test -f Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift && test -f Tests/TuberiaCatalogTests/ComponentIntegrityTests.swift` both succeed.
-- [ ] `grep -l 'integrityCheckFailed' Tests/TuberiaCatalogTests/ComponentIntegrityTests.swift` returns the file path.
-- [ ] `grep -cE 'func test[A-Z]' Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift Tests/TuberiaCatalogTests/ComponentIntegrityTests.swift` returns ≥ 4 (happy, integrity, not-downloaded, LoRA).
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -only-testing:TuberiaCatalogTests/WeightLoaderIntegrationTests -only-testing:TuberiaCatalogTests/ComponentIntegrityTests` exits 0.
-- [ ] Deliberately flipping a byte in the staged synthetic file during local run produces `AcervoError.integrityCheckFailed` (verified by the integrity test asserting the thrown error).
-- [ ] Tests use no network: `grep -rnE 'URLSession|URLRequest|http(s)?://' Tests/TuberiaCatalogTests/WeightLoaderIntegrationTests.swift Tests/TuberiaCatalogTests/ComponentIntegrityTests.swift` returns 0 matches.
-
----
-
-### Sortie 7: REQ-CDN-01 — Verify Uploaded Manifest Matches Repository Descriptors
-
-**Priority**: 7.0 — guards checksum drift; depends on S2.
-
-**Entry criteria**:
-- [ ] REQ-T4 (Sortie 2) is COMPLETE — `CatalogRegistration.swift` contains populated `sha256` and `expectedSizeBytes` per file.
-- [ ] `.github/workflows/ensure-model-cdn.yml` currently runs `acervo manifest create` + `acervo upload` with a `Verify upload` step but does not cross-check manifest digests against source-of-truth descriptors.
-
-**Tasks**:
-1. **Chosen helper form**: create a new SwiftPM executable target at `Tools/VerifyComponentManifest/main.swift` (or similar). Rationale: a standalone executable is invokable from CI without spinning up the XCTest runtime; a dumping test would couple CI verification to the test target. Add the target to `Package.swift` (plugin-free, depends on `TuberiaCatalog`).
-2. The executable reads a downloaded `manifest.json` path from argv, loads the registered `ComponentDescriptor` set from `CatalogRegistration`, and compares `{path, size, sha256}` per file. Prints diff-style mismatches to stderr and exits non-zero on any divergence; exits 0 on full match.
-3. Add a `Verify manifest matches source` step to `.github/workflows/ensure-model-cdn.yml` that runs **after** `Verify upload`. The step downloads the uploaded `manifest.json` and invokes the executable from task 1.
-4. On any mismatch in `sha256` or `expectedSizeBytes`, the job fails with a clear diff-style error message naming the component, path, expected vs actual values (the executable already emits this; the CI step just surfaces the exit code).
-5. Document the verification contract via inline comments in `.github/workflows/ensure-model-cdn.yml`.
-
-**Exit criteria**:
-- [ ] `test -f Tools/VerifyComponentManifest/main.swift` succeeds (or the chosen target path documented in Package.swift).
-- [ ] `grep -n 'VerifyComponentManifest\|verify_component_manifest\|verify-manifest' Package.swift` returns ≥ 1 match (target registered).
-- [ ] `xcodebuild build -scheme VerifyComponentManifest -destination 'platform=macOS,arch=arm64'` exits 0 (the new target builds).
-- [ ] `grep -nE 'Verify manifest matches source|VerifyComponentManifest' .github/workflows/ensure-model-cdn.yml` returns ≥ 1 match AFTER the existing `Verify upload` step (line-number ordering check).
-- [ ] Local divergence test: after editing one hex digit in `CatalogRegistration.swift`, running the executable against the unedited manifest exits non-zero; reverting the edit makes it exit 0. (Documented in the sortie log; reviewer reproduces.)
-- [ ] YAML remains parse-valid: `python3 -c 'import yaml,sys; yaml.safe_load(open(".github/workflows/ensure-model-cdn.yml"))'` exits 0.
-
----
-
-### Sortie 8: REQ-DOC-01 — Update AGENTS.md / Architecture Docs for v2 Completion
-
-**Priority**: 2.0 — final documentation sweep; runs only after S1–S7 ship.
-
-**Entry criteria**:
-- [ ] Sorties 1–7 are COMPLETE and merged.
-- [ ] `AGENTS.md` "Recent Changes" and `requirements/INFRASTRUCTURE.md:209-218` "Audit Checklist" currently contain stale claims.
-
-**Tasks**:
-1. Add a new changelog entry (next available version, e.g. v0.3.7) to `AGENTS.md` summarizing: SwiftAcervo floor → 0.7.2 (S1), per-file SHA-256 checksums (S2), `ensureComponentReady` wired in (S3), `hardValidate` + `PipelineError.insufficientMemory` (S4), role-map `findComponentId` (S5), integration tests (S6), CDN manifest verification (S7). One bullet per sortie, each referencing its sortie ID.
-2. Audit `requirements/INFRASTRUCTURE.md:209-218` Audit Checklist — for every `[x]` item, confirm it is truly implemented; convert `[x]`→`[ ]` if still incomplete, or keep `[x]` with a parenthetical `(REQ-XXX)` link to the sortie/commit that satisfied it.
-3. Add `- [REQUIREMENTS.md](REQUIREMENTS.md) — active mission scope` to `AGENTS.md`'s top-level "Architecture" section (or equivalent).
-4. Reconcile `architecture/PROTOCOLS.md` and `architecture/INFRASTRUCTURE.md` load-path descriptions with the implementation after S3/S4/S5. If they diverge, update the doc; if they already match, no edit needed.
-5. Mark `REQUIREMENTS.md` Status Snapshot rows 6–12 as ✅ DONE, each row's Evidence column linking to the satisfying sortie/commit.
-
-**Exit criteria**:
-- [ ] `grep -nE 'v0\.3\.[7-9]|v0\.[4-9]' AGENTS.md` returns ≥ 1 match (new changelog entry exists).
-- [ ] New changelog entry mentions all 7 sortie IDs: `grep -oE 'REQ-(T[45]|PIPE-0[123]|INT-01|CDN-01)' AGENTS.md | sort -u | wc -l | tr -d ' '` returns `7`.
-- [ ] `grep -n 'REQUIREMENTS\.md' AGENTS.md` returns ≥ 1 match (cross-link).
-- [ ] `grep -cE '^\| *[6-9] \|.*✅ DONE' REQUIREMENTS.md` returns `7` (rows 6 through 12 all marked DONE).
-- [ ] `grep -cE '^- \[x\]' requirements/INFRASTRUCTURE.md` count matches actual implemented items (manual attestation by sortie author in commit message: "verified every [x] in INFRASTRUCTURE.md Audit Checklist").
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` exits 0 (no regression from prose-only edits).
-
----
-
-## Master Acceptance (from REQUIREMENTS.md § Definition of Done)
-
-Mission complete when all of the following hold:
-
-- [ ] All rows in the `REQUIREMENTS.md` Status Snapshot read ✅ DONE.
-- [ ] `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64'` passes on a clean clone.
-- [ ] `xcodebuild test …` with a locally corrupted component file surfaces `AcervoError.integrityCheckFailed` (propagated as `PipelineError.weightLoadingFailed`).
-- [ ] Fresh `swift package reset && xcodebuild build` resolves SwiftAcervo ≥ 0.7.2.
-- [ ] `ensure-model-cdn.yml` workflow's manifest-verification step fails on a deliberate checksum mismatch.
-- [ ] Master index `/Users/stovak/Projects/REQUIREMENTS.md` SwiftTuberia row moves from 🔴 RED 0% to 🟢 GREEN 100%; Sorties 2.1–2.3 + T1–T5 all marked 🟢 COMPLETE.
+- [ ] `grep -n 'deletingLastPathComponent' Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` returns 0 matches
+- [ ] `grep -n 'rootDirectoryURL' Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` returns ≥ 1 match
+- [ ] `grep -n 'ensureComponentReady' Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` returns ≥ 1 match AND `grep -En '^\s*///.*[Pp]recondition' Sources/TuberiaCatalog/Encoders/T5XXLEncoder.swift` returns ≥ 1 match
+- [ ] `xcodebuild test` exits 0 (TuberiaCatalogTests tokenizer loads correctly)
+- [ ] U1: `git log -1 --format=%s` matches `^Tuberia-S3: `
+- [ ] U2: `git status --porcelain` is empty
 
 ---
 
 ## Open Questions & Missing Documentation
 
-Issues surfaced during Pass 4 refinement. Items marked **RESOLVED** were auto-fixed in the sortie bodies above; items marked **NOTED** are non-blocking design decisions already captured inline; items marked **DEFERRED** are out of scope for this mission.
+### Resolved Items (auto-fixed during refinement)
 
-| # | Sortie | Issue Type | Description | Resolution |
-|---|--------|-----------|-------------|------------|
-| 1 | S1 | Design choice | AGENTS.md v0.3.0 changelog says "0.6.0" — rewrite vs append new entry | **RESOLVED**: append new entry (preserves history). Exit criterion enforces via grep. |
-| 2 | S2 | Flawed exit criterion | Original `grep 'ComponentFile(relativePath:'` returned-zero check is false (new form also matches) | **RESOLVED**: replaced with positive-assertion grep counting `sha256:` and `expectedSizeBytes:` entries. |
-| 3 | S3 | Design choice | New `PipelineProgress.downloading(…)` case vs fold into existing tick stream | **RESOLVED**: fold into existing stream; public enum unchanged. Exit criterion enforces no new case. |
-| 4 | S3 | Vague exit criterion | "Behavior satisfies PROTOCOLS.md step sequencing" not machine-verifiable | **RESOLVED**: replaced with grep + test file existence + test assertion check. |
-| 5 | S4 | Design choice | `hardValidate(peak)` once vs `softCheck` + phased `hardValidate` per phase | **RESOLVED**: single up-front `hardValidate`. Phased load **DEFERRED** to a future mission if real peak-vs-phase divergence appears. |
-| 6 | S4 | Error-type ambiguity | Task 2 referenced `PipelineError.insufficientMemory` without defining it | **RESOLVED**: sortie now explicitly defines the case in `PipelineError.swift` and tests for it. |
-| 7 | S5 | Scope ambiguity | "Update any recipe that relied on positional ordering" — how many recipes exist? | **RESOLVED**: verified exactly one conformer (`MockPipelineRecipe`). Entry criteria record this. |
-| 8 | S6 | External assumption | Assumes internal `withComponentAccess(_:in:perform:)` overload exists in 0.7.2 | **RESOLVED**: verified at `SwiftAcervo/Sources/SwiftAcervo/AcervoManager.swift:455`. |
-| 9 | S7 | Design choice | Executable target vs descriptor-dumping test | **RESOLVED**: executable target chosen (decouples CI from test runtime). |
-| 10 | S7 | Conditional tooling | "actionlint or yamllint clean **if such tooling is in use**" — fallback undefined | **RESOLVED**: replaced with unconditional `python3 -c 'import yaml; yaml.safe_load(…)'` parse check. |
-| 11 | S8 | Subjective exit | "A fresh reader can reconstruct the v2 integration state… without running grep" | **RESOLVED**: replaced with objective checks (sortie-ID coverage, cross-link presence, DONE-row count). |
-| 12 | S8 | Manual attestation | INFRASTRUCTURE.md checklist audit can't be fully machine-verified | **NOTED**: reviewer must attest in commit message; remaining exit criteria are machine-checkable. |
-| 13 | All | Non-blocking items | LoRA descriptors, plugin backbones, CLIP/DDPM, renderers | **DEFERRED** — explicitly captured in REQUIREMENTS.md § Non-Blocking / Deferred Items. |
+| Sortie | Issue Type | Description | Resolution |
+|--------|-----------|-------------|------------|
+| SwiftAcervo → SwiftTuberia boundary | Missing step | SwiftTuberia consumes SwiftAcervo as a remote package (`upToNextMajor(from: "0.8.2")`). Changes from Acervo-S1 must be tagged and released before `xcodebuild -resolvePackageDependencies` can fetch them. Original plan had no release sortie. | AUTO-FIXED: Added SwiftAcervo-S2 (release sortie) |
+| SwiftAcervo-S3 (was S2) exit criterion 1 | Vague criterion | "ComponentDescriptor bare initializer accepts `estimatedSizeBytes: Int64? = nil`" is not machine-verifiable | AUTO-FIXED: Replaced with `grep -n 'estimatedSizeBytes.*Int64.*nil'` returning ≥ 1 match |
+| SwiftTuberia-S3 exit criterion 3 | Vague criterion | "Docstring on `loadTokenizer` contains 'ensureComponentReady' and 'precondition'" not machine-verifiable | AUTO-FIXED: Replaced with two independent grep commands |
+| SwiftTuberia-S2 entry criteria | Missing context | AcervoError case names required for typed pattern matching but source location unspecified | AUTO-FIXED: Added entry criterion to read `../SwiftAcervo` AcervoError before writing catch blocks |
+| SwiftTuberia-S3 Task 1 | Vague instruction | "swift package update SwiftAcervo (via xcodebuild resolve)" — `swift package update` is excluded per CLAUDE.md (only `swift build` and `swift test` are forbidden, but intent was xcodebuild) | AUTO-FIXED: Changed to `xcodebuild -resolvePackageDependencies` with exact flags |
+| SwiftAcervo-S2 exit criterion 3 | Sub-agent constraint violation + race condition | Exit criterion ran `xcodebuild -resolvePackageDependencies` on SwiftTuberia from the sub-agent. Violates "sub-agent: no build operations" constraint. Also races with supervising agent modifying Package.resolved concurrently during Tuberia-S1/S2. Package.resolved update is S3's responsibility (Task 1). | AUTO-FIXED: Removed the criterion from S2; two remaining criteria (git tag + gh release) fully verify the release |
+| SwiftTuberia-S3 exit criterion 3 | Vague criterion | `grep -n 'precondition'` would match any `precondition()` assertion in code, not just the docstring — false positive risk | AUTO-FIXED: Tightened to `grep -En '^\s*///.*[Pp]recondition'` which requires the word to appear in a Swift doc-comment line |
+| SwiftTuberia-S1 and S2 priority notes | Inaccurate annotation | Priority notes said "no other sortie depends on this" — factually wrong; SwiftTuberia-S3 entry criteria explicitly require both S1 and S2 COMPLETED. Scores were 2.5/2.75 (dep_depth=0 assumed); corrected to 5.75 each (dep_depth=1, formula: 3+0+2+0.83=5.83) | AUTO-FIXED: Updated priority notes and scores to reflect dep_depth=1 |
 
-**Blocking issues remaining**: 0.
+**Auto-Fixed**: 8
+**Requires Manual Review**: 0
+
+---
+
+## Minimum Viable Outcome (MVO)
+
+**New for iteration 02 — added because iteration 01 had no graceful descope path.**
+
+The mission may be landed on `main` (declared "shipped, not finished") if all of the following hold, even if the full DoD is not yet met:
+
+1. SwiftTuberia-S1 (bare descriptors + deprecation) is COMPLETED and committed.
+2. SwiftTuberia-S2 (typed AcervoError handling) is COMPLETED and committed.
+3. `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO` exits 0.
+4. Any unfinished work (Acervo-S2 release, Tuberia-S3) is captured as a tracked GitHub issue, with a link added to `requirements/ACERVO_V2_COMPLIANCE.md`.
+
+If MVO is met but DoD is not, the supervisor's `brief` command should record outcome "Partially Complete (MVO landed, DoD pending)" rather than "Abandoned." This is a successful outcome, not a failure.
+
+---
+
+## Definition of Done (Full Mission)
+
+All of the following must hold simultaneously:
+
+1. `grep -rn 'ComponentFile\|findSafetensorsFiles\|canEnumerateDirectory\|FileManager' Sources/` returns 0 matches
+2. `grep -rn 'contains("Not\|contains("not' Sources/Tuberia/Infrastructure/WeightLoader.swift` returns 0 matches
+3. `grep -rn 'deletingLastPathComponent' Sources/TuberiaCatalog/` returns 0 matches
+4. `xcodebuild test -scheme SwiftTuberia-Package -destination 'platform=macOS,arch=arm64' -parallel-testing-enabled NO` exits 0
+5. All `ComponentHandle` and `LocalHandle` accesses in SwiftTuberia go through `.url(for:)`, `.url(matching:)`, `.urls(matching:)`, or `.rootDirectoryURL`
+6. **U1 (per-sortie commits):** `git log 36887b9..HEAD --format=%s` shows one commit per code sortie, each with the `<WorkUnit>-<SortieID>:` subject pattern.
 
 ---
 
@@ -326,26 +330,11 @@ Issues surfaced during Pass 4 refinement. Items marked **RESOLVED** were auto-fi
 
 | Metric | Value |
 |--------|-------|
-| Work units | 1 |
-| Total sorties | 8 |
-| Dependency structure | 4 layers (1, 2, 3, 4); Layer 1 fully parallel; Layer 2 partial-parallel (S4/S5 serialize on `DiffusionPipeline.swift`) |
-| Critical path | S3 → S5 → S8 (length 3); equivalent: S2 → S6 → S8, S3 → S4 → S8 |
-| Max concurrency | 3 sorties in Layer 1 + Layer 2 work (supervising + up to 2 sub-agents on non-build portions) |
-| Build-constrained sorties | S1, S2, S3, S4, S5, S6 (supervising-agent-only) |
-| Sub-agent-eligible | S7 (authoring), S8 (prose) |
-| Files primarily touched | `Package.swift`, `Sources/TuberiaCatalog/Registration/CatalogRegistration.swift`, `Sources/Tuberia/Pipeline/{DiffusionPipeline,PipelineRecipe,PipelineError}.swift`, `Sources/Tuberia/Infrastructure/MemoryManager.swift`, `Tests/TuberiaCatalogTests/**`, `Tests/TuberiaTests/**`, `Tools/VerifyComponentManifest/**`, `.github/workflows/ensure-model-cdn.yml`, `AGENTS.md`, `REQUIREMENTS.md`, `requirements/INFRASTRUCTURE.md`, `architecture/**` |
-
----
-
-## Refinement Pass Results
-
-| Pass | Status | Changes |
-|------|--------|---------|
-| 1. Atomicity & Testability | ✓ PASS | 0 splits, 0 merges; 4 vague exit criteria rewritten as machine-verifiable grep/file-exists/exit-code checks (S2 grep bug, S3 protocol-compliance claim, S7 conditional tooling, S8 subjective reader test) |
-| 2. Prioritization | ✓ PASS | Priority scores added to all 8 sorties; existing 1→8 numbering preserved (priorities align with dependency order; no renumber needed) |
-| 3. Parallelism | ✓ PASS | Critical path = 3 sorties; Group A (Layer 1) fully parallel; Group B partial; build-constraint map added (6 supervising, 2 sub-agent-eligible) |
-| 4. Open Questions & Vague Criteria | ✓ PASS | 12 issues catalogued — 11 auto-resolved inline, 1 requires reviewer attestation (S8 checklist audit), 0 blocking |
-
-**VERDICT**: ✓ Plan is ready to execute.
-
-**Next step**: `/mission-supervisor start`
+| Iteration | 02 (re-run after iteration 01 was abandoned with 3/6 sorties complete) |
+| Work units | 2 (SwiftAcervo, SwiftTuberia) |
+| Total sorties | 6 (3 + 3; +1 release sortie added during refinement) |
+| Dependency structure | SwiftAcervo-S1 → S2 (release) → SwiftTuberia-S3; Tuberia-S1/S2 parallel with Acervo-S2 on supervising agent |
+| Optional sorties | 1 (SwiftAcervo-S3) |
+| Critical path | 4 sorties (Acervo-S1 → Tuberia-S1 → Tuberia-S2 → Tuberia-S3; supervising agent) |
+| Parallelism | 1 supervising agent + 1 sub-agent (Acervo-S2 release runs while supervising agent does Tuberia-S1/S2) |
+| Iteration 02 deltas | Sonnet model floor on Acervo-S1/S2 (was: S2 haiku); `gh auth status` precondition on S2; per-sortie commit gate (U1) on every code sortie; clean-tree gate (U2) on every code sortie; MVO section added; trigger-condition mechanic for resume-from-PARTIAL |

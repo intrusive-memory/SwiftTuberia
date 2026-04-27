@@ -94,17 +94,22 @@ public struct WeightLoader: Sendable {
 
     } catch let error as PipelineError {
       throw error
-    } catch {
-      // Map Acervo errors to PipelineError
-      let errorString = String(describing: error)
-      if errorString.contains("NotDownloaded") || errorString.contains("notDownloaded")
-        || errorString.contains("notRegistered") || errorString.contains("invalidModelId")
-      {
-        throw PipelineError.modelNotDownloaded(component: componentId)
-      }
+    } catch AcervoError.componentNotDownloaded(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.componentNotRegistered(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.componentNotHydrated(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
       throw PipelineError.weightLoadingFailed(
         component: componentId,
-        reason: errorString
+        reason:
+          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+      )
+    } catch {
+      throw PipelineError.weightLoadingFailed(
+        component: componentId,
+        reason: String(describing: error)
       )
     }
   }
@@ -112,7 +117,7 @@ public struct WeightLoader: Sendable {
   /// Load weights from a local file path (used for LoRA adapters not registered in Acervo).
   ///
   /// File access is scoped through `AcervoManager.shared.withLocalAccess` — no direct
-  /// `FileManager` or path construction occurs in Tuberia.
+  /// file system access or path construction occurs in Tuberia.
   ///
   /// - Parameters:
   ///   - path: Local filesystem path to a safetensors file or directory containing safetensors files.
@@ -150,6 +155,18 @@ public struct WeightLoader: Sendable {
       }
     } catch let error as PipelineError {
       throw error
+    } catch AcervoError.componentNotDownloaded(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.componentNotRegistered(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.componentNotHydrated(let id) {
+      throw PipelineError.modelNotDownloaded(component: id)
+    } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
+      throw PipelineError.weightLoadingFailed(
+        component: path,
+        reason:
+          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+      )
     } catch {
       throw PipelineError.weightLoadingFailed(
         component: path,
@@ -159,84 +176,6 @@ public struct WeightLoader: Sendable {
   }
 
   // MARK: - Private Helpers
-
-  /// Returns true if the calling process can enumerate (opendir) the given directory.
-  ///
-  /// Used to distinguish between an entitled process that has App Group container access
-  /// (returns `true`) and an unentitled xctest process that can stat but not open files
-  /// in the container (returns `false`).
-  private static func canEnumerateDirectory(_ directory: URL) -> Bool {
-    guard
-      let enumerator = FileManager.default.enumerator(
-        at: directory,
-        includingPropertiesForKeys: nil,
-        options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-      )
-    else { return false }
-    return enumerator.nextObject() != nil
-  }
-
-  /// Find all `.safetensors` files in a directory.
-  ///
-  /// Tries `FileManager.enumerator` first (fast, works when the process can opendir the
-  /// directory). Falls back to a stat-based probe when opendir is denied — e.g. when
-  /// the directory lives inside a macOS App Group container and the test process lacks
-  /// the `com.apple.security.application-groups` entitlement. The probe covers the two
-  /// HuggingFace naming conventions: a single `model.safetensors` file and sharded files
-  /// named `model-NNNNN-of-MMMMM.safetensors`.
-  private static func findSafetensorsFiles(in directory: URL) -> [URL] {
-    let fm = FileManager.default
-
-    // Fast path: enumerate with opendir (works in non-sandboxed / entitled contexts).
-    if let enumerator = fm.enumerator(
-      at: directory,
-      includingPropertiesForKeys: nil,
-      options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-    ) {
-      var urls: [URL] = []
-      for case let fileURL as URL in enumerator {
-        if fileURL.pathExtension == "safetensors" {
-          urls.append(fileURL)
-        }
-      }
-      if !urls.isEmpty {
-        return urls.sorted { $0.lastPathComponent < $1.lastPathComponent }
-      }
-      // Enumerator returned 0 results — may be due to Container Manager blocking opendir
-      // on macOS App Group containers when the process lacks the entitlement.
-      // Fall through to stat-based probe to check if files actually exist.
-    }
-
-    // Fallback: stat-based probe for HuggingFace naming conventions.
-    // This works even when opendir is denied (e.g. macOS App Group container
-    // accessed from an unentitled test process).
-    print("[WeightLoader] stat-based probe for: \(directory.path)")
-
-    // Pattern 1: single-shard model.safetensors
-    let singleFile = directory.appendingPathComponent("model.safetensors")
-    let singleExists = fm.fileExists(atPath: singleFile.path)
-    print("[WeightLoader] model.safetensors exists: \(singleExists)")
-    if singleExists {
-      return [singleFile]
-    }
-
-    // Pattern 2: sharded model-NNNNN-of-MMMMM.safetensors — probe total shard count 1…99
-    for totalShards in 1...99 {
-      let firstName = String(format: "model-00000-of-%05d.safetensors", totalShards)
-      let firstURL = directory.appendingPathComponent(firstName)
-      guard fm.fileExists(atPath: firstURL.path) else { continue }
-
-      // Found the shard count. Build the full shard list.
-      var shards: [URL] = []
-      for i in 0..<totalShards {
-        let name = String(format: "model-%05d-of-%05d.safetensors", i, totalShards)
-        shards.append(directory.appendingPathComponent(name))
-      }
-      return shards
-    }
-
-    return []
-  }
 
   /// Apply quantization to a tensor according to the configuration.
   private static func applyQuantization(

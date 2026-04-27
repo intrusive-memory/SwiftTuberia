@@ -41,7 +41,8 @@ struct CatalogRegistrationTests {
     #expect(descriptor?.id == "t5-xxl-encoder-int4")
     #expect(descriptor?.type == .encoder)
     #expect(descriptor?.repoId == "intrusive-memory/t5-xxl-int4-mlx")
-    #expect(descriptor?.estimatedSizeBytes == 1_288_490_188)  // ~1.2 GB
+    // Bare descriptor — size is fetched from CDN manifest on first use, not declared up front.
+    #expect(descriptor?.estimatedSizeBytes == 0)
   }
 
   @Test("SDXL VAE descriptor has correct metadata")
@@ -54,7 +55,8 @@ struct CatalogRegistrationTests {
     #expect(descriptor?.id == "sdxl-vae-decoder-fp16")
     #expect(descriptor?.type == .decoder)
     #expect(descriptor?.repoId == "intrusive-memory/sdxl-vae-fp16-mlx")
-    #expect(descriptor?.estimatedSizeBytes == 167_772_160)  // ~160 MB
+    // Bare descriptor — size is fetched from CDN manifest on first use, not declared up front.
+    #expect(descriptor?.estimatedSizeBytes == 0)
   }
 
   @Test("descriptor(for:) returns correct descriptor by ID")
@@ -90,18 +92,19 @@ struct CatalogRegistrationTests {
     #expect(!registry.isComponentRegistered("unknown-component"))
   }
 
-  @Test("Component descriptors include required files")
+  @Test("Bare descriptors are not pre-hydrated (files fetched from CDN manifest on first use)")
   func requiredFiles() {
     let registry = CatalogRegistration.shared
     registry.ensureRegistered()
 
+    // Bare descriptors have _files == nil; .files returns [] until the CDN manifest hydrates them.
     let t5 = registry.descriptor(for: "t5-xxl-encoder-int4")
-    // config.json, tokenizer.json, tokenizer_config.json, special_tokens_map.json,
-    // model-00000-of-00005.safetensors through model-00004-of-00005.safetensors (5 shards)
-    #expect(t5?.files.count == 9)
+    #expect(t5?.isHydrated == false)
+    #expect(t5?.files.count == 0)
 
     let vae = registry.descriptor(for: "sdxl-vae-decoder-fp16")
-    #expect(vae?.files.count == 2)  // config.json, model.safetensors
+    #expect(vae?.isHydrated == false)
+    #expect(vae?.files.count == 0)
   }
 
   @Test("Component descriptors include required files with non-empty relativePaths")

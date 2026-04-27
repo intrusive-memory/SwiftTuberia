@@ -2,43 +2,6 @@ import Foundation
 import SwiftAcervo
 import Tuberia
 
-// MARK: - Required Component Files
-
-/// T5-XXL Encoder (int4 quantized) required files.
-///
-/// The model is hosted on HuggingFace at `intrusive-memory/t5-xxl-int4-mlx`.
-/// All safetensors shards, configuration, and tokenizer files are required for
-/// both weight loading and tokenization.
-///
-/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
-private let t5XXLEncoderRequiredFiles: [ComponentFile] = [
-  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "tokenizer.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "tokenizer_config.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "special_tokens_map.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(
-    relativePath: "model-00000-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(
-    relativePath: "model-00001-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(
-    relativePath: "model-00002-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(
-    relativePath: "model-00003-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(
-    relativePath: "model-00004-of-00005.safetensors", expectedSizeBytes: nil, sha256: nil),
-]
-
-/// SDXL VAE Decoder (fp16) required files.
-///
-/// The model is hosted on HuggingFace at `intrusive-memory/sdxl-vae-fp16-mlx`.
-/// Includes the model weights and configuration for decoding.
-///
-/// sha256 and expectedSizeBytes are nil — SwiftAcervo's CDN manifest is the single source of truth for file integrity.
-private let sdxlVAEDecoderRequiredFiles: [ComponentFile] = [
-  ComponentFile(relativePath: "config.json", expectedSizeBytes: nil, sha256: nil),
-  ComponentFile(relativePath: "model.safetensors", expectedSizeBytes: nil, sha256: nil),
-]
-
 // MARK: - Acervo Component Registration
 
 /// T5-XXL Encoder component descriptor.
@@ -50,8 +13,6 @@ private let t5XXLEncoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
   type: .encoder,
   displayName: "T5-XXL Text Encoder (int4)",
   repoId: "intrusive-memory/t5-xxl-int4-mlx",
-  files: t5XXLEncoderRequiredFiles,
-  estimatedSizeBytes: 1_288_490_188,  // ~1.2 GB
   minimumMemoryBytes: 2_000_000_000,
   metadata: [
     "component_role": "text_encoder",
@@ -70,8 +31,6 @@ private let sdxlVAEDecoderComponentDescriptor = SwiftAcervo.ComponentDescriptor(
   type: .decoder,
   displayName: "SDXL VAE Decoder (fp16)",
   repoId: "intrusive-memory/sdxl-vae-fp16-mlx",
-  files: sdxlVAEDecoderRequiredFiles,
-  estimatedSizeBytes: 167_772_160,  // ~160 MB
   minimumMemoryBytes: 500_000_000,
   metadata: [
     "component_role": "decoder",
@@ -137,6 +96,11 @@ public final class CatalogRegistration: @unchecked Sendable {
   ///
   /// - Parameter componentId: The component to prepare.
   /// - Throws: AcervoError if download or validation fails.
+  @available(
+    *, deprecated,
+    message:
+      "Use ComponentReadinessService (with progress) or Acervo.ensureComponentReady directly."
+  )
   public func ensureComponentReady(_ componentId: String) async throws {
     try await Acervo.ensureComponentReady(componentId)
   }
