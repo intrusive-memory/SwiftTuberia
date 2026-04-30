@@ -11,7 +11,7 @@ import Tuberia
 /// Forward: `x * rsqrt(mean(x^2) + eps) * weight`
 public final class T5RMSNorm: MLXNN.Module {
   /// Scale parameter, shape [hidden_dim].
-  var weight: MLXArray
+  public internal(set) var weight: MLXArray
 
   private let eps: Float
 
@@ -22,10 +22,22 @@ public final class T5RMSNorm: MLXNN.Module {
   }
 
   public func callAsFunction(_ x: MLXArray) -> MLXArray {
-    // Compute RMS: mean(x^2) + eps
-    let meanSquare = x.square().mean(axis: -1, keepDims: true)
+    // Cast to float32 for the variance reduction to avoid fp16 overflow.
+    //
+    // Why: `.mean(axis: -1)` is implemented as `.sum(axis: -1) / N`. For T5-XXL
+    // (hidden=4096), if any per-token variance exceeds ~16, the intermediate
+    // sum of squared embeddings exceeds fp16's finite range (~65504) and rounds
+    // to +inf. Then rsqrt(+inf) = 0, and the entire output for that token
+    // collapses to zero — silently. T5 token embeddings routinely produce
+    // per-token variances of 30-50, so this hits real-world data hard.
+    //
+    // The diffusers reference (transformers.models.t5.modeling_t5.T5LayerNorm)
+    // does the same fp32 cast for the same reason.
+    let inputDtype = x.dtype
+    let xf32 = x.asType(.float32)
+    let meanSquare = xf32.square().mean(axis: -1, keepDims: true)
     let rms = MLX.rsqrt(meanSquare + eps)
-    return x * rms * weight
+    return (xf32 * rms).asType(inputDtype) * weight
   }
 }
 
@@ -184,10 +196,15 @@ public final class T5GatedFFN: MLXNN.Module {
 ///   -> pre_ffn_norm  -> ffn       -> residual(+x)
 /// ```
 public final class T5EncoderBlock: MLXNN.Module {
-  var pre_attn_norm: T5RMSNorm
-  var attention: T5Attention
-  var pre_ffn_norm: T5RMSNorm
-  var ffn: T5GatedFFN
+  public internal(set) var pre_attn_norm: T5RMSNorm
+  public internal(set) var attention: T5Attention
+  public internal(set) var pre_ffn_norm: T5RMSNorm
+  public internal(set) var ffn: T5GatedFFN
+
+  /// Optional debug tap. The forward pass calls it at every named sub-checkpoint
+  /// (post_norm1, post_attn, post_residual1, post_norm2, post_ffn, post_residual2)
+  /// when set, so a test harness can capture activations within block 0.
+  public var debugTap: ((_ name: String, _ tensor: MLXArray) -> Void)?
 
   public init(
     hiddenDim: Int = 4096,
@@ -222,13 +239,20 @@ public final class T5EncoderBlock: MLXNN.Module {
   ) -> MLXArray {
     // Self-attention with pre-norm and residual
     let normedForAttn = pre_attn_norm(x)
+    debugTap?("post_norm1", normedForAttn)
     let attnOut = attention(normedForAttn, positionBias: positionBias, mask: mask)
+    debugTap?("post_attn", attnOut)
     let postAttn = x + attnOut
+    debugTap?("post_residual1", postAttn)
 
     // FFN with pre-norm and residual
     let normedForFFN = pre_ffn_norm(postAttn)
+    debugTap?("post_norm2", normedForFFN)
     let ffnOut = ffn(normedForFFN)
-    return postAttn + ffnOut
+    debugTap?("post_ffn", ffnOut)
+    let result = postAttn + ffnOut
+    debugTap?("post_residual2", result)
+    return result
   }
 }
 
@@ -273,15 +297,23 @@ public final class T5TransformerEncoder: MLXNN.Module {
   /// Token embedding table [vocab_size, hidden_dim].
   var embedding: MLXNN.Embedding
 
-  /// 24 transformer encoder blocks.
-  var blocks: [T5EncoderBlock]
+  /// 24 transformer encoder blocks. Public so test harnesses can install a
+  /// per-block debugTap; production callers should not rely on this.
+  public internal(set) var blocks: [T5EncoderBlock]
 
   /// Final RMS layer norm.
-  var final_norm: T5RMSNorm
+  public internal(set) var final_norm: T5RMSNorm
 
   /// Relative position bias table [num_heads, num_buckets].
   /// Single instance shared across all layers (only stored/declared here).
   var relative_position_bias: MLXArray
+
+  /// Optional debug tap. When set, the forward pass calls it at every named
+  /// checkpoint (post-embedding, post-block-N, post-final-norm) so a test
+  /// harness can capture intermediate activations for numerical comparison
+  /// against a reference implementation. Defaults to nil — no per-step
+  /// overhead in production.
+  public var debugTap: ((_ name: String, _ tensor: MLXArray) -> Void)?
 
   public init(
     vocabSize: Int = 32128,
@@ -331,10 +363,12 @@ public final class T5TransformerEncoder: MLXNN.Module {
 
     // Embed token IDs: [B, seq_len, hidden_dim]
     var hidden = embedding(tokenIds)
+    debugTap?("post_embedding", hidden)
 
     // Compute relative position bias once for all layers
     let posBias = computeRelativePositionBias(seqLen: seqLen)
     // posBias: [1, num_heads, seq_len, seq_len]
+    debugTap?("relative_position_bias", posBias)
 
     // Reshape attention mask for broadcasting in attention: [B, 1, 1, seq_len]
     let attnMask: MLXArray?
@@ -345,12 +379,14 @@ public final class T5TransformerEncoder: MLXNN.Module {
     }
 
     // Run through all encoder blocks
-    for block in blocks {
+    for (idx, block) in blocks.enumerated() {
       hidden = block(hidden, positionBias: posBias, mask: attnMask)
+      debugTap?("post_block_\(idx)", hidden)
     }
 
     // Final layer norm
     hidden = final_norm(hidden)
+    debugTap?("post_final_norm", hidden)
 
     return hidden
   }
