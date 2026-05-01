@@ -378,6 +378,16 @@ public final class T5TransformerEncoder: MLXNN.Module {
       attnMask = nil
     }
 
+    // TODO(fp32-stack): hidden states stay in fp16 across all 24 residual
+    // blocks. Numerical comparison vs the diffusers reference shows ~0.988
+    // mean cosine similarity at post_final_norm — within fp16 accumulation
+    // drift, not a correctness bug, but bit-perfect parity would require
+    // running the entire encoder stack (attention QKV projections, FFN
+    // matmuls, residual adds) in fp32 and casting back at the boundary.
+    // T5RMSNorm already does its variance reduction in fp32; extending the
+    // same treatment through the rest of the forward path is the followup.
+    // See SwiftVinetas/Tests/SwiftVinetasGPUTests/T5DiffuserComparisonDump.swift
+    // for the regression harness that measures this drift.
     // Run through all encoder blocks
     for (idx, block) in blocks.enumerated() {
       hidden = block(hidden, positionBias: posBias, mask: attnMask)
