@@ -27,7 +27,11 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   public typealias Configuration = T5XXLEncoderConfiguration
 
   private let configuration: Configuration
-  private var transformer: T5TransformerEncoder?
+  /// Internal access (formerly private) so test harnesses can install a
+  /// `debugTap` for per-layer activation capture without forcing the encoder
+  /// to grow a debug API on its own. Production callers should not rely on
+  /// this — it is documented as test-only.
+  public internal(set) var transformer: T5TransformerEncoder?
   private var tokenizer: (any Tokenizer)?
   private var _currentWeights: Tuberia.ModuleParameters?
   public private(set) var isLoaded: Bool = false

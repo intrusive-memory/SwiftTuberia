@@ -2,11 +2,19 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.0
+**Version**: 0.6.1
 
 ---
 
 ## Recent Changes
+
+### v0.6.1 — Fix T5RMSNorm fp16 sum overflow
+
+Casts the variance reduction in `T5RMSNorm` to fp32 before `mean(axis: -1)`, matching diffusers' `T5LayerNorm`. Without the cast, T5-XXL token embeddings — whose channel magnitudes reach ~100 — overflow the fp16 intermediate sum at hidden_dim=4096: any per-token variance > ~16 pushes the running sum past fp16's finite range (~65504), the sum rounds to `+inf`, and `rsqrt(+inf) = 0` collapses the entire RMSNorm output to literally zero for that token. The corruption is silent and propagates through every downstream layer.
+
+- **Impact on PixArt canonical fixture prompt**: 10 of 13 real (non-padding) tokens were hitting the overflow. Output mean cosine vs. the diffusers reference was 0.36 — every content token diverged, only EOS matched. With the fp32 cast, mean cosine is ≥0.988 at every layer and end-to-end PixArt generation produces a recognizable photographic image instead of a flat cartoon abstraction.
+- **Residual drift, documented not fixed**: even with the fp32 variance cast, post-final-norm cosine measures 0.988 rather than 1.000 across 24 transformer blocks. This is fp16 accumulation noise in the rest of the stack, not a correctness bug. A `TODO` in `T5TransformerEncoder` notes that bit-perfect parity with diffusers would require running the full block stack in fp32. Out of scope for this patch.
+- Dependency floor bumps: `SwiftAcervo` `0.8.3` → `0.8.4`; `swift-tokenizers` `0.4.2` → `0.4.3` (latest published patch releases — both retain `.upToNextMajor`).
 
 ### v0.6.0 — OPERATION VANISHING MANIFEST: SwiftAcervo v2 compliance
 
