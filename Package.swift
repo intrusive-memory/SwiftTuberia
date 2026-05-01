@@ -1,7 +1,7 @@
 // swift-tools-version: 6.2
 
-import PackageDescription
 import Foundation
+import PackageDescription
 
 // In CI we always pin to released remotes. Locally, prefer a sibling checkout
 // at ../<name> if present so in-flight changes can be exercised end-to-end
@@ -38,10 +38,10 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.8.3"),
+      from: "0.8.4"),
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMajor(from: "0.4.2"), traits: ["Swift"]),
+      .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
   ],
   targets: [
     .target(
