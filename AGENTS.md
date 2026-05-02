@@ -2,11 +2,21 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.1
+**Version**: 0.6.2
 
 ---
 
 ## Recent Changes
+
+### v0.6.2 — SPM checkouts sibling helper fix
+
+Patches the `sibling()` helper in `Package.swift` so it no longer false-positives when SwiftTuberia is consumed as a transitive dependency.
+
+The previous helper preferred a `.package(path: "../<name>")` reference whenever `../<name>` existed on disk — intended for local dev workspaces. Inside Xcode's `DerivedData/.../SourcePackages/checkouts/` (or SwiftPM's `.build/checkouts/`) every sibling package lives in the same directory, so the existence check succeeded for every dependency and the helper switched them all to unversioned path references. Those collided with the same identities pulled in via remote URLs elsewhere in the graph and aborted resolution with `Conflicting identity for swiftacervo`.
+
+Detect the checkout context by inspecting `#filePath` for the well-known SPM path segments and skip the sibling shortcut there. Local dev workflow and CI behavior are unchanged.
+
+- Dependency floor bump: `SwiftAcervo` `0.8.4` → `0.8.5` (latest published patch, retains `.upToNextMajor`).
 
 ### v0.6.1 — Fix T5RMSNorm fp16 sum overflow
 
