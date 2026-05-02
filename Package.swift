@@ -14,7 +14,8 @@ import PackageDescription
 // in-development local paths produces conflicting package identities, so we
 // must skip the sibling shortcut in that context.
 let manifestDir = (#filePath as NSString).deletingLastPathComponent
-let isSPMCheckout = manifestDir.contains("/SourcePackages/checkouts/")
+let isSPMCheckout =
+  manifestDir.contains("/SourcePackages/checkouts/")
   || manifestDir.contains("/.build/checkouts/")
 let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
 let useLocalSiblings = !isCI && !isSPMCheckout
@@ -48,7 +49,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.8.4"),
+      from: "0.8.5"),
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
       .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
