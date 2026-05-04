@@ -8,6 +8,8 @@ import Tuberia
 @Suite("CatalogRegistration Tests", .serialized)
 struct CatalogRegistrationTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   @Test("ensureRegistered() registers components via SwiftAcervo")
   func registersExpectedComponents() {
     let registry = CatalogRegistration.shared
