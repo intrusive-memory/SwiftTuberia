@@ -2,11 +2,19 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.2-dev
+**Version**: 0.6.3
 
 ---
 
 ## Recent Changes
+
+### v0.6.3 — SwiftAcervo v0.11.1 floor bump + workflow env exports
+
+Patch release aligned with OPERATION GROUPHOUSE MUSTER canary validation.
+
+- **Dependency floor bump**: `SwiftAcervo` `0.10.0` → `0.11.1` (latest published release — retains `.upToNextMajor`).
+- **CI workflow env exports**: `ACERVO_APP_GROUP_ID` now exported at the workflow job level (already merged via Sortie 1.7 / PR #30), ensuring test runners never silently trap on missing App Group configuration.
+- **Documentation**: AGENTS.md updated with current `ACERVO_APP_GROUP_ID` env var contract (already merged via Sortie 2.7 / PR #31).
 
 ### v0.6.2 — SPM checkouts sibling helper fix
 

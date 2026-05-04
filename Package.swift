@@ -49,7 +49,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.10.0"),
+      from: "0.11.1"),
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
       .upToNextMajor(from: "0.4.3"), traits: ["Swift"]),
