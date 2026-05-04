@@ -195,6 +195,8 @@ private final class RoleMapSpy: ComponentReadinessService, @unchecked Sendable {
 @Suite("RecipeRoleMap Tests", .serialized)
 struct RecipeRoleMapTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   let encoderComponentId = "role-map-encoder"
   let backboneComponentId = "role-map-backbone"
   let decoderComponentId = "role-map-decoder"
