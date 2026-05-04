@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Read [AGENTS.md](AGENTS.md) first** for universal project documentation (architecture, components, build commands, critical rules).
+**Read [AGENTS.md](AGENTS.md) first** for universal project documentation (architecture, components, build commands, critical rules). See [AGENTS.md](./AGENTS.md) § App Group configuration for the `ACERVO_APP_GROUP_ID` env var contract.
 
 ## Claude-Specific Build Preferences
 

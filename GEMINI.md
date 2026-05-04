@@ -1,6 +1,6 @@
 # Gemini-Specific Agent Instructions
 
-**Read [AGENTS.md](AGENTS.md) first** for universal project documentation.
+**Read [AGENTS.md](AGENTS.md) first** for universal project documentation. See [AGENTS.md](./AGENTS.md) § App Group configuration for the `ACERVO_APP_GROUP_ID` env var contract.
 
 This file contains instructions specific to Google Gemini agents.
 
