@@ -165,6 +165,8 @@ private struct MemGuardRecipe: PipelineRecipe, Sendable {
 @Suite("MemoryGuard Tests", .serialized)
 struct MemoryGuardTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   // MARK: - Helpers
 
   private typealias TestPipeline = DiffusionPipeline<

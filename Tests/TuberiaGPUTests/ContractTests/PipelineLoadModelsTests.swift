@@ -84,6 +84,8 @@ final class ProgressTickCollector: @unchecked Sendable {
 @Suite("PipelineLoadModels Tests", .serialized)
 struct PipelineLoadModelsTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   // MARK: - Helpers
 
   /// Component IDs assigned to mock components in the recipe.

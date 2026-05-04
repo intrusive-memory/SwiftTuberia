@@ -124,6 +124,8 @@ private func makeScalarWeights(numLayers: Int = 2) -> Tuberia.ModuleParameters {
 @Suite("T5 Placeholder Tokenization Tests", .serialized)
 struct T5PlaceholderTokenizationTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   /// "a photo of a cat" is ~17 chars → estimatedTokens = 17/4 + 1 = 5
   /// Our placeholder uses char-count / 4 + 1. This test verifies it produces
   /// a plausible count in the 4–7 range (as specified by the requirements).
@@ -255,6 +257,8 @@ struct T5PlaceholderTokenizationTests {
 @Suite("T5 Encode with Synthetic Weights Tests", .serialized)
 struct T5EncodeWithSyntheticWeightsTests {
 
+  init() { TestEnvironment.ensureAcervoAppGroup() }
+
   private let seqLen = 8
 
   private func makeLoadedEncoder() throws -> T5XXLEncoder {
@@ -380,6 +384,8 @@ struct T5EncodeWithSyntheticWeightsTests {
 /// but the method must be present and must not crash.
 @Suite("T5 loadTokenizer Presence Tests", .serialized)
 struct T5LoadTokenizerPresenceTests {
+
+  init() { TestEnvironment.ensureAcervoAppGroup() }
 
   @Test("loadTokenizer() is callable and non-crashing in test environment")
   func loadTokenizerIsCallableAndNonCrashing() async throws {
