@@ -2,11 +2,20 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.4
+**Version**: 0.6.5
 
 ---
 
 ## Recent Changes
+
+### v0.6.5 — swift-tokenizers 0.5.0 floor bump (broken-resolution fix)
+
+Patch release that unbreaks SPM resolution against upstream swift-tokenizers.
+
+- **Floor bump**: `swift-tokenizers` `0.4.3` → `0.5.0` (latest published release — retains `.upToNextMajor`).
+- **Trait declaration removed**: previous releases passed `traits: ["Swift"]` to swift-tokenizers. As of 0.5.0, the package dropped its trait system and is Rust-backend-only — passing the trait now fails resolution. The trait argument is gone from `Package.swift`.
+- **Consumer impact**: SwiftTuberia consumers will now resolve the binary `TokenizersRust` XCFramework that swift-tokenizers 0.5.0 declares as a binary target. Min platforms (iOS 17 / macOS 14) are well below SwiftTuberia's iOS 26 / macOS 26 floor; no platform changes required.
+- **No source changes**: `AutoTokenizer.from(directory:)` and the `Tokenizer` protocol surface used by `T5XXLEncoder` are unchanged across the 0.4 → 0.5 boundary.
 
 ### v0.6.4 — Maintenance release
 
