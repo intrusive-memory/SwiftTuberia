@@ -2,11 +2,18 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.3
+**Version**: 0.6.4
 
 ---
 
 ## Recent Changes
+
+### v0.6.4 — Maintenance release
+
+Patch release with no functional changes. Refreshes the development snapshot to a clean release tag and updates documentation/CI hygiene.
+
+- Documentation version refs synchronized to v0.6.4.
+- CI workflow actions audited.
 
 ### v0.6.3 — SwiftAcervo v0.11.1 floor bump + workflow env exports
 

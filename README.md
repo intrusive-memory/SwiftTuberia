@@ -1,6 +1,6 @@
 # SwiftTuberia
 
-**v0.6.3** — Componentized generation pipeline for MLX inference.
+**v0.6.4** — Componentized generation pipeline for MLX inference.
 
 ## Overview
 
@@ -26,7 +26,7 @@ Add SwiftTuberia to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.6.3")
+    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.6.4")
 ]
 ```
 
