@@ -349,12 +349,19 @@ public actor DiffusionPipeline<
           }
         }
 
-        let weights = try await WeightLoader.load(
-          componentId: componentId,
-          keyMapping: segment.keyMapping,
-          tensorTransform: segment.tensorTransform,
-          quantization: quantization
-        )
+        let weights: ModuleParameters
+        do {
+          weights = try await WeightLoader.load(
+            componentId: componentId,
+            keyMapping: segment.keyMapping,
+            tensorTransform: segment.tensorTransform,
+            quantization: quantization
+          )
+        } catch let pipelineErr as PipelineError {
+          // Telemetry: errorThrown — weight loading failed; emit before rethrowing.
+          if let telemetry { await telemetry.capture(.errorThrown(phase: "loadModels.weightLoad", error: pipelineErr)) }
+          throw pipelineErr
+        }
 
         // Telemetry: segmentWeightsLoaded — payload requires actor hop for bytesAfter.
         if let telemetry {
@@ -368,7 +375,16 @@ public actor DiffusionPipeline<
           ))
         }
 
-        try segment.apply(weights: weights)
+        do {
+          try segment.apply(weights: weights)
+        } catch let pipelineErr as PipelineError {
+          // Telemetry: errorThrown — segment weight application failed; emit before rethrowing.
+          if let telemetry { await telemetry.capture(.errorThrown(phase: "loadModels.segmentApply", error: pipelineErr)) }
+          throw pipelineErr
+        } catch {
+          // Non-PipelineError from apply: rethrow as-is (no telemetry emit — not a PipelineError).
+          throw error
+        }
 
         await MemoryManager.shared.registerLoaded(
           component: componentId,
@@ -448,13 +464,19 @@ public actor DiffusionPipeline<
     progress: @Sendable (PipelineProgress) -> Void
   ) async throws -> Result {
     guard encoder.isLoaded else {
-      throw PipelineError.missingComponent(role: "encoder")
+      let err = PipelineError.missingComponent(role: "encoder")
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.preconditions", error: err)) }
+      throw err
     }
     guard backbone.isLoaded else {
-      throw PipelineError.missingComponent(role: "backbone")
+      let err = PipelineError.missingComponent(role: "backbone")
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.preconditions", error: err)) }
+      throw err
     }
     guard decoder.isLoaded else {
-      throw PipelineError.missingComponent(role: "decoder")
+      let err = PipelineError.missingComponent(role: "decoder")
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.preconditions", error: err)) }
+      throw err
     }
 
     let startTime = Date()
@@ -479,6 +501,13 @@ public actor DiffusionPipeline<
     // After the denoising loop, the base weights are restored via LoRALoader.unapply.
     let loraAdapterWeights: ModuleParameters?
     if let loraConfig = request.loRA {
+      // Telemetry: loraLoadStart — before LoRALoader.loadAdapterWeights.
+      let adapterPath = loraConfig.componentId ?? loraConfig.localPath ?? ""
+      await emit(.loraLoadStart(
+        adapterPath: adapterPath,
+        scale: loraConfig.scale,
+        activationKeyword: loraConfig.activationKeyword
+      ))
       loraAdapterWeights = try await LoRALoader.loadAdapterWeights(
         config: loraConfig,
         keyMapping: backbone.keyMapping
@@ -487,6 +516,14 @@ public actor DiffusionPipeline<
       if let adapterWeights = loraAdapterWeights,
         let baseWeights = backbone.currentWeights
       {
+        // Telemetry: loraMerge — after adapter weights are loaded, before merge.
+        if let telemetry {
+          await telemetry.capture(.loraMerge(
+            adapterParameterCount: adapterWeights.parameters.count,
+            baseParameterCount: baseWeights.parameters.count,
+            scale: loraConfig.scale
+          ))
+        }
         let mergedWeights = LoRALoader.apply(
           adapterWeights: adapterWeights,
           to: baseWeights,
@@ -530,7 +567,9 @@ public actor DiffusionPipeline<
     do {
       conditionalOutput = try encoder.encode(encoderInput)
     } catch {
-      throw PipelineError.encodingFailed(reason: String(describing: error))
+      let err = PipelineError.encodingFailed(reason: String(describing: error))
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.encode", error: err)) }
+      throw err
     }
     progress(.encoding(fraction: 0.5))
 
@@ -547,7 +586,9 @@ public actor DiffusionPipeline<
         do {
           unconditionalOutput = try encoder.encode(uncondInput)
         } catch {
-          throw PipelineError.encodingFailed(reason: "Unconditional encoding failed: \(error)")
+          let err = PipelineError.encodingFailed(reason: "Unconditional encoding failed: \(error)")
+          if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.encode", error: err)) }
+          throw err
         }
 
       case .zeroVector(let shape):
@@ -593,10 +634,12 @@ public actor DiffusionPipeline<
     {
       // Image-to-image: encode reference, add noise
       guard let bidirectionalDecoder = decoder as? any BidirectionalDecoder else {
-        throw PipelineError.generationFailed(
+        let err = PipelineError.generationFailed(
           step: 0,
           reason: "Image-to-image requires a BidirectionalDecoder"
         )
+        if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.img2img", error: err)) }
+        throw err
       }
 
       // Convert CGImage to MLXArray with shape [1, H, W, 3] in [0, 1] range
@@ -617,10 +660,12 @@ public actor DiffusionPipeline<
           latents = imageLatents
         }
       } catch {
-        throw PipelineError.generationFailed(
+        let err = PipelineError.generationFailed(
           step: 0,
           reason: "Failed to encode reference image: \(error)"
         )
+        if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.img2img", error: err)) }
+        throw err
       }
     } else {
       // Text-to-image: pure noise
@@ -692,10 +737,12 @@ public actor DiffusionPipeline<
           )
         }
       } catch {
-        throw PipelineError.generationFailed(
+        let err = PipelineError.generationFailed(
           step: stepIndex + 1,
           reason: String(describing: error)
         )
+        if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.denoise", error: err)) }
+        throw err
       }
 
       // Evaluate to ensure computation runs
@@ -715,7 +762,9 @@ public actor DiffusionPipeline<
     do {
       decodedOutput = try decoder.decode(latents)
     } catch {
-      throw PipelineError.decodingFailed(reason: String(describing: error))
+      let err = PipelineError.decodingFailed(reason: String(describing: error))
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.decode", error: err)) }
+      throw err
     }
     // Telemetry: decodeComplete — after decoding succeeds.
     await emit(.decodeComplete(durationSeconds: Date().timeIntervalSince(decodeStartTime)))
@@ -729,7 +778,9 @@ public actor DiffusionPipeline<
     do {
       renderedOutput = try renderer.render(decodedOutput)
     } catch {
-      throw PipelineError.renderingFailed(reason: String(describing: error))
+      let err = PipelineError.renderingFailed(reason: String(describing: error))
+      if let telemetry { await telemetry.capture(.errorThrown(phase: "generate.render", error: err)) }
+      throw err
     }
     // Telemetry: renderComplete — after rendering succeeds.
     await emit(.renderComplete(durationSeconds: Date().timeIntervalSince(renderStartTime)))
@@ -744,6 +795,8 @@ public actor DiffusionPipeline<
         scale: loraConfig.scale
       )
       try backbone.apply(weights: restoredWeights)
+      // Telemetry: loraUnmerge — after LoRALoader.unapply restores base weights.
+      await emit(.loraUnmerge(scale: loraConfig.scale))
     }
 
     let duration = Date().timeIntervalSince(startTime)
