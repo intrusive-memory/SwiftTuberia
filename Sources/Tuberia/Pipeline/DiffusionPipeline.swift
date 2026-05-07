@@ -355,7 +355,8 @@ public actor DiffusionPipeline<
             componentId: componentId,
             keyMapping: segment.keyMapping,
             tensorTransform: segment.tensorTransform,
-            quantization: quantization
+            quantization: quantization,
+            telemetry: self.telemetry
           )
         } catch let pipelineErr as PipelineError {
           // Telemetry: errorThrown — weight loading failed; emit before rethrowing.

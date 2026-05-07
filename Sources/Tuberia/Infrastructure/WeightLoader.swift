@@ -27,6 +27,12 @@ public struct WeightLoader: Sendable {
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform applied after key remapping, before quantization.
   ///   - quantization: Quantization strategy to apply to loaded tensors.
+  ///   - telemetry: Optional telemetry reporter. Defaulted to `nil` so existing call sites compile
+  ///     unchanged. WeightLoader itself emits no events by design — the surrounding pipeline is
+  ///     the emitter (e.g. `DiffusionPipeline.loadModels` emits `segmentWeightsLoaded` after
+  ///     this call returns). The parameter is threaded so a future revision can emit
+  ///     loader-internal events (sharded-file progress, integrity-check timings) without a
+  ///     breaking signature change.
   /// - Returns: Remapped, optionally quantized parameter tensors ready for module assignment.
   /// - Throws: `PipelineError.modelNotDownloaded` if the component is not ready in Acervo.
   ///           `PipelineError.weightLoadingFailed` on parse or I/O errors.
@@ -34,8 +40,10 @@ public struct WeightLoader: Sendable {
     componentId: String,
     keyMapping: KeyMapping,
     tensorTransform: TensorTransform? = nil,
-    quantization: QuantizationConfig = .asStored
+    quantization: QuantizationConfig = .asStored,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
+    _ = telemetry  // Reserved for future loader-internal emits; pipeline is the current emitter.
     do {
       let result = try await AcervoManager.shared.withComponentAccess(componentId) {
         handle -> ModuleParameters in
@@ -124,14 +132,19 @@ public struct WeightLoader: Sendable {
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform.
   ///   - quantization: Quantization strategy.
+  ///   - telemetry: Optional telemetry reporter, defaulted to `nil`. Mirrors the parameter on
+  ///     `load(componentId:…)` for API symmetry. WeightLoader emits no events itself by design;
+  ///     this is plumbing for a future revision.
   /// - Returns: Remapped parameter tensors.
   /// - Throws: `PipelineError.weightLoadingFailed` on I/O or parse errors.
   public static func loadFromPath(
     _ path: String,
     keyMapping: KeyMapping,
     tensorTransform: TensorTransform? = nil,
-    quantization: QuantizationConfig = .asStored
+    quantization: QuantizationConfig = .asStored,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
+    _ = telemetry  // Reserved for future loader-internal emits; pipeline is the current emitter.
     let url = URL(fileURLWithPath: path)
     do {
       return try await AcervoManager.shared.withLocalAccess(url) { handle in

@@ -1,5 +1,6 @@
 import Foundation
 import MLX
+import Metal
 
 #if canImport(Darwin)
   import Darwin
@@ -21,7 +22,25 @@ public actor MemoryManager {
   /// Tracks loaded component sizes by component ID.
   private var loadedComponents: [String: UInt64] = [:]
 
+  /// Optional telemetry reporter, set via `setTelemetry(_:)`. Defaults to `nil` (no events).
+  /// Used by `clearGPUCache` to emit a terminal `unloadSegment(role: nil, …)` event with
+  /// Metal allocated-bytes deltas around the `MLX.Memory.clearCache()` call.
+  var telemetry: (any TuberiaTelemetryReporter)? = nil
+
+  /// Cached Metal device. Lazily resolved on first access so we don't pay
+  /// `MTLCreateSystemDefaultDevice()` cost on every `clearGPUCache` emit. May be `nil` on
+  /// hosts without a Metal device (e.g. some CI environments) — call sites must tolerate `nil`.
+  private lazy var metalDevice: (any MTLDevice)? = MTLCreateSystemDefaultDevice()
+
   private init() {}
+
+  // MARK: - Telemetry
+
+  /// Replace the telemetry reporter. Default is `nil` (no events emitted).
+  /// Call before any operation whose telemetry you wish to observe.
+  public func setTelemetry(_ reporter: (any TuberiaTelemetryReporter)?) {
+    self.telemetry = reporter
+  }
 
   // MARK: - Device Capability
 
@@ -116,7 +135,19 @@ public actor MemoryManager {
 
   /// Clear the MLX GPU buffer cache.
   /// Call between loading phases to free memory for the next phase.
-  public func clearGPUCache() {
+  ///
+  /// Emits `unloadSegment(role: nil, componentId: nil, metalAllocatedBytesBefore:,
+  /// metalAllocatedBytesAfter:)` around the `MLX.Memory.clearCache()` call when a
+  /// telemetry reporter is set. This is the canonical "did Metal release pages?" probe
+  /// — the only emitter of `unloadSegment(role: nil, …)` in the package.
+  public func clearGPUCache() async {
+    let bytesBefore: UInt64? = metalDevice.map { UInt64($0.currentAllocatedSize) }
     MLX.Memory.clearCache()
+    let bytesAfter: UInt64? = metalDevice.map { UInt64($0.currentAllocatedSize) }
+    if let telemetry {
+      await telemetry.capture(.unloadSegment(role: nil, componentId: nil,
+        metalAllocatedBytesBefore: bytesBefore,
+        metalAllocatedBytesAfter: bytesAfter))
+    }
   }
 }
