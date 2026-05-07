@@ -245,6 +245,53 @@ Any new key convention added to `LoRALoader` **must** have a corresponding test 
 - **Updating dependencies**: Edit `Package.swift`, run `xcodebuild -resolvePackageDependencies`.
 - **Releasing**: Follow the ship-swift-library skill workflow — bump version on `development`, merge PR, tag on `main`.
 
+## Telemetry
+
+SwiftTuberia provides an **opt-in telemetry surface** (`Sources/Tuberia/Telemetry/`) so consumers can observe pipeline lifecycle, generation, and weight-loading events without Tuberia taking a dependency on any specific telemetry framework.
+
+### Default behavior: zero overhead
+
+By default, the pipeline reports nothing. When no reporter is attached, `telemetry == nil` and the pipeline emits no events, allocates no event objects, and incurs only a nil-check per call site.
+
+### Opt-in contract
+
+Consumers attach a reporter via:
+
+```swift
+let pipeline = try DiffusionPipeline(recipe: recipe)
+await pipeline.setTelemetry(MyReporter())   // optional
+try await pipeline.loadModels(progress: { _, _ in })
+```
+
+See `Tests/TuberiaTests/Telemetry/MockTuberiaTelemetryReporter.swift` for a concrete example reporter.
+
+### Event categories
+
+Events fall into four categories, all defined in `TuberiaTelemetryEvent`:
+
+- **Lifecycle** (`loadStart`, `memoryGate`, `segmentLoadStart`, `segmentWeightsLoaded`, `segmentApplied`, `loadComplete`, `unloadSegment`) — fire during `loadModels()` and `unloadModels()` with memory and component state.
+- **Generation** (`generateStart`, `encodeStart`, `encodeComplete`, `decodeStart`, `decodeComplete`, `renderStart`, `renderComplete`, `generateComplete`, `denoiseStep`) — fire during `generate()` with phase timing and latent/embedding shapes.
+- **LoRA** (`loraLoadStart`, `loraMerge`, `loraUnmerge`) — fire when a LoRA adapter is loaded and merged during generation.
+- **Errors** (`errorThrown`) — fires immediately before any `PipelineError` is thrown from public API, with phase label and error details.
+
+### Consumer implementation
+
+Implement the `TuberiaTelemetryReporter` protocol to define how events are handled:
+
+```swift
+public protocol TuberiaTelemetryReporter: Sendable {
+  func capture(_ event: TuberiaTelemetryEvent) async
+}
+```
+
+Reporters are `Sendable` and `async` so they can batch, write to disk, or forward to a central telemetry sink without blocking pipeline progress. The pipeline never lets a reporter failure abort generation.
+
+### How Produciesta consumes this
+
+Produciesta's `ProduciestaCore` provides a `TuberiaTelemetryAdapter` that bridges Tuberia events into Produciesta's central `MemoryTelemetry` actor for multi-repo diagnostics. See [`../Produciesta/MULTI_REPO_TELEMETRY.md`](../Produciesta/MULTI_REPO_TELEMETRY.md) for the consumer architecture. This reference is informational only — **Tuberia does not import or depend on Produciesta in any way.**
+
+---
+
 ## Critical Rules for AI Agents
 
 1. NEVER commit directly to `main`

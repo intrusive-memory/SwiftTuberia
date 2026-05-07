@@ -81,6 +81,30 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 
 **Priority**: `base_model.model.` prefix stripping must be added to `LoRALoader.parseLoRAKey` before any load path in either downstream package can route through the shared loader for PEFT adapters. See `AGENTS.md` § LoRA Adapter Interoperability for full policy and test requirements.
 
+## Telemetry
+
+SwiftTuberia provides opt-in telemetry so you can observe pipeline load, generation, and unload phases without taking a hard dependency on any logging framework. Telemetry is disabled by default — when no reporter is attached, the pipeline emits nothing and incurs zero overhead.
+
+To attach a reporter:
+
+```swift
+let pipeline = try DiffusionPipeline(recipe: recipe)
+await pipeline.setTelemetry(MyReporter())   // optional
+try await pipeline.loadModels(progress: { _, _ in })
+```
+
+Events are defined in the `TuberiaTelemetryEvent` enum and span four categories: lifecycle (`loadStart`, `memoryGate`, `segmentLoadStart`, etc.), generation (`generateStart`, `denoiseStep`, `decodeComplete`, etc.), LoRA (`loraLoadStart`, `loraMerge`, `loraUnmerge`), and errors (`errorThrown`).
+
+Implement the `TuberiaTelemetryReporter` protocol to receive events:
+
+```swift
+public protocol TuberiaTelemetryReporter: Sendable {
+  func capture(_ event: TuberiaTelemetryEvent) async
+}
+```
+
+For a concrete starting point, see the test fixture at `Tests/TuberiaTests/Telemetry/MockTuberiaTelemetryReporter.swift`.
+
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
