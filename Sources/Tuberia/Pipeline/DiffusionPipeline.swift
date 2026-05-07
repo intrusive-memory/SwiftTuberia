@@ -68,6 +68,12 @@ public actor DiffusionPipeline<
     try await MemoryManager.shared.hardValidate(requiredBytes: requiredBytes)
   }
 
+  // MARK: - Telemetry Seam
+
+  /// Optional telemetry reporter. Defaults to `nil` (no events emitted).
+  /// Set via `setTelemetry(_:)` before calling `loadModels(progress:)` to observe load events.
+  var telemetry: (any TuberiaTelemetryReporter)? = nil
+
   // MARK: - Init
 
   /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
@@ -192,6 +198,12 @@ public actor DiffusionPipeline<
     memoryGate = gate
   }
 
+  /// Replace the telemetry reporter. Default is `nil` (no events emitted).
+  /// Call before `loadModels(progress:)` to capture load events.
+  public func setTelemetry(_ reporter: (any TuberiaTelemetryReporter)?) {
+    self.telemetry = reporter
+  }
+
   // MARK: - GenerationPipeline Conformance
 
   /// Memory requirements -- computed from static config, safe to access without `await`.
@@ -213,6 +225,20 @@ public actor DiffusionPipeline<
   ///
   /// Progress callback receives (fraction: Double, component: String).
   public func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws {
+    let loadStartTime = Date()
+
+    // Telemetry: loadStart — emitted before the memory gate, payload requires actor hop.
+    if let telemetry {
+      let peak = _memoryRequirement.peakMemoryBytes
+      let phased = _memoryRequirement.phasedMemoryBytes
+      let available = await MemoryManager.shared.availableMemory
+      await telemetry.capture(.loadStart(
+        peakMemoryBytes: peak,
+        phasedMemoryBytes: phased,
+        availableMemoryBytes: available
+      ))
+    }
+
     // Memory gate (REQ-PIPE-02, S4): validate available memory before committing to loading.
     //
     // Strategy: single up-front hardValidate against peakMemoryBytes.
@@ -222,12 +248,31 @@ public actor DiffusionPipeline<
     let peak = _memoryRequirement.peakMemoryBytes
     do {
       try await memoryGate(peak)
+      // Telemetry: memoryGate passed — query available memory for the event payload.
+      if let telemetry {
+        let available = await MemoryManager.shared.availableMemory
+        await telemetry.capture(.memoryGate(
+          requiredBytes: peak,
+          availableBytes: available,
+          passed: true
+        ))
+      }
     } catch let error as PipelineError {
+      // Telemetry: memoryGate failed, then errorThrown — emit before rethrowing.
+      if case .insufficientMemory(let required, let available, _) = error {
+        await emit(.memoryGate(requiredBytes: required, availableBytes: available, passed: false))
+      } else {
+        await emit(.memoryGate(requiredBytes: peak, availableBytes: 0, passed: false))
+      }
+      await emit(.errorThrown(phase: "loadModels.memoryGate", error: error))
       // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
       throw error
     } catch {
       // Unexpected error from a custom gate: wrap in insufficientMemory with 0 available.
-      throw PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
+      let wrappedError = PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
+      await emit(.memoryGate(requiredBytes: peak, availableBytes: 0, passed: false))
+      await emit(.errorThrown(phase: "loadModels.memoryGate", error: wrappedError))
+      throw wrappedError
     }
 
     // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
@@ -249,10 +294,19 @@ public actor DiffusionPipeline<
 
     let totalSegments = Double(weightedSegments.count)
     var loadedCount = 0.0
+    var totalEstimatedBytes: UInt64 = 0
 
     for (segment, componentId, role, quantization) in weightedSegments {
       let componentName = role.rawValue
       progress(loadedCount / totalSegments, componentName)
+
+      // Telemetry: segmentLoadStart — emitted before ensureComponentReady.
+      await emit(.segmentLoadStart(
+        role: role,
+        componentId: componentId ?? "",
+        quantization: quantization.description,
+        estimatedBytes: UInt64(segment.estimatedMemoryBytes)
+      ))
 
       if let componentId = componentId {
         // Ensure the component files are present on disk (downloads if missing).
@@ -265,7 +319,13 @@ public actor DiffusionPipeline<
         let capturedCount = loadedCount
         let capturedTotal = totalSegments
         let capturedName = componentName
-        try await componentReadinessService.ensureComponentReady(componentId) { downloadProgress in
+        let capturedRole = role
+        let capturedComponentId = componentId
+        // Rate-limit segmentDownloadProgress: only emit when overallProgress advances >= 0.01.
+        // _DownloadProgressState is a reference-type box allowing mutation across @Sendable
+        // closure invocations (declared at file scope to work inside generic actor methods).
+        let progressState = _DownloadProgressState()
+        try await componentReadinessService.ensureComponentReady(componentId) { [self] downloadProgress in
           // Map Acervo's per-file fraction into the segment's slot in the overall bar.
           // Each segment occupies a 1/totalSegments window; download fill fills the
           // first half of that window, leaving the second half for weight-apply below.
@@ -273,6 +333,20 @@ public actor DiffusionPipeline<
           let slotWidth = 1.0 / capturedTotal
           let fraction = slotStart + slotWidth * 0.5 * downloadProgress.overallProgress
           progress(fraction, capturedName)
+          // Telemetry: segmentDownloadProgress — rate-limited at the call site (>= 0.01 delta).
+          // The progress closure is @Sendable but synchronous; we fire-and-forget a Task
+          // to cross the async/actor boundary without blocking download progress delivery.
+          let overall = downloadProgress.overallProgress
+          if overall - progressState.last >= 0.01 {
+            progressState.last = overall
+            Task { [self] in
+              await emit(.segmentDownloadProgress(
+                role: capturedRole,
+                componentId: capturedComponentId,
+                overallProgress: overall
+              ))
+            }
+          }
         }
 
         let weights = try await WeightLoader.load(
@@ -282,23 +356,73 @@ public actor DiffusionPipeline<
           quantization: quantization
         )
 
+        // Telemetry: segmentWeightsLoaded — payload requires actor hop for bytesAfter.
+        if let telemetry {
+          let bytesAfter = await MemoryManager.shared.loadedComponentsMemory
+          await telemetry.capture(.segmentWeightsLoaded(
+            role: role,
+            componentId: componentId,
+            safetensorsFileCount: 1,
+            parameterCount: weights.parameters.count,
+            bytesAfter: bytesAfter
+          ))
+        }
+
         try segment.apply(weights: weights)
 
         await MemoryManager.shared.registerLoaded(
           component: componentId,
           bytes: UInt64(segment.estimatedMemoryBytes)
         )
+
+        // Telemetry: segmentApplied — emitted after registerLoaded.
+        await emit(.segmentApplied(
+          role: role,
+          componentId: componentId,
+          estimatedMemoryBytes: UInt64(segment.estimatedMemoryBytes)
+        ))
+
+        totalEstimatedBytes += UInt64(segment.estimatedMemoryBytes)
       }
 
       loadedCount += 1.0
       progress(loadedCount / totalSegments, componentName)
     }
+
+    // Telemetry: loadComplete — emitted after the loop with total duration and bytes.
+    await emit(.loadComplete(
+      durationSeconds: Date().timeIntervalSince(loadStartTime),
+      totalEstimatedBytes: totalEstimatedBytes
+    ))
   }
 
   /// Unload all weighted segments and unregister from MemoryManager.
   public func unloadModels() async {
+    // Telemetry: unloadSegment — one per segment, emitted before the actual unload call.
+    // Metal byte fields stay nil here; the post-clearGPUCache unloadSegment(role: nil, …)
+    // with Metal byte deltas is wired in Sortie 9 inside MemoryManager.clearGPUCache.
+    await emit(.unloadSegment(
+      role: .encoder,
+      componentId: _componentIdByRole[.encoder],
+      metalAllocatedBytesBefore: nil,
+      metalAllocatedBytesAfter: nil
+    ))
     encoder.unload()
+
+    await emit(.unloadSegment(
+      role: .backbone,
+      componentId: _componentIdByRole[.backbone],
+      metalAllocatedBytesBefore: nil,
+      metalAllocatedBytesAfter: nil
+    ))
     backbone.unload()
+
+    await emit(.unloadSegment(
+      role: .decoder,
+      componentId: _componentIdByRole[.decoder],
+      metalAllocatedBytesBefore: nil,
+      metalAllocatedBytesAfter: nil
+    ))
     decoder.unload()
 
     for componentId in _componentIdByRole.values {
@@ -587,6 +711,14 @@ public actor DiffusionPipeline<
     )
   }
 
+  // MARK: - Telemetry Helpers
+
+  /// Emit a telemetry event if a reporter is set. No-op when `telemetry == nil`.
+  private func emit(_ event: TuberiaTelemetryEvent) async {
+    guard let telemetry else { return }
+    await telemetry.capture(event)
+  }
+
   // MARK: - Private Helpers
 
   /// Find the component ID for a given pipeline role using the role-keyed dictionary.
@@ -665,4 +797,15 @@ public actor DiffusionPipeline<
 
     return reshaped
   }
+}
+
+// MARK: - Download Progress Rate-Limit Helper
+
+/// Mutable reference-type box used to track the last-emitted download progress value.
+///
+/// Declared at file scope (outside the generic actor) because Swift does not allow a
+/// class type to be nested inside a generic function. Marked `@unchecked Sendable` because
+/// mutations only occur serially inside `ensureComponentReady`'s progress callback.
+private final class _DownloadProgressState: @unchecked Sendable {
+  var last: Double = -1.0
 }
