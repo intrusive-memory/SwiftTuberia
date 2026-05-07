@@ -462,6 +462,18 @@ public actor DiffusionPipeline<
     // Determine the actual seed
     let actualSeed = request.seed ?? UInt32.random(in: 0...UInt32.max)
 
+    // Telemetry: generateStart — after guards and resolved seed, before LoRA.
+    await emit(.generateStart(
+      promptCharacterCount: request.prompt.count,
+      width: request.width,
+      height: request.height,
+      steps: request.steps,
+      guidanceScale: request.guidanceScale,
+      hasReferenceImages: !(request.referenceImages?.isEmpty ?? true),
+      hasLoRA: request.loRA != nil,
+      seed: actualSeed
+    ))
+
     // LoRA: load adapter weights and merge into backbone before generation.
     // Single active LoRA constraint: only one LoRA config per generation call.
     // After the denoising loop, the base weights are restored via LoRALoader.unapply.
@@ -493,6 +505,21 @@ public actor DiffusionPipeline<
     }
 
     // --- Step 1: Encode prompt ---
+    let encodeStartTime = Date()
+    let useCFG = request.guidanceScale > 1.0
+    // Telemetry: encodeStart — before the encoder's first encode call.
+    // unconditionalStrategy is computed from the stored enum to avoid allocating per-step.
+    let unconditionalStrategyDescription: String = {
+      switch _unconditionalEmbeddingStrategy {
+      case .emptyPrompt: return "emptyPrompt"
+      case .zeroVector: return "zeroVector"
+      case .none: return "none"
+      }
+    }()
+    await emit(.encodeStart(
+      useCFG: useCFG,
+      unconditionalStrategy: unconditionalStrategyDescription
+    ))
     progress(.encoding(fraction: 0.0))
     let encoderInput = TextEncoderInput(
       text: effectivePrompt,
@@ -509,7 +536,6 @@ public actor DiffusionPipeline<
 
     // Compute unconditional embeddings for CFG
     let unconditionalOutput: TextEncoderOutput?
-    let useCFG = request.guidanceScale > 1.0
 
     if useCFG {
       switch _unconditionalEmbeddingStrategy {
@@ -541,6 +567,13 @@ public actor DiffusionPipeline<
       unconditionalOutput = nil
     }
     progress(.encoding(fraction: 1.0))
+
+    // Telemetry: encodeComplete — after both conditional and (if any) unconditional encodings.
+    await emit(.encodeComplete(
+      durationSeconds: Date().timeIntervalSince(encodeStartTime),
+      conditionalEmbeddingShape: conditionalOutput.embeddings.shape,
+      hasUnconditional: unconditionalOutput != nil
+    ))
 
     // --- Step 2: Prepare initial latents ---
     let latentHeight = request.height / 8
@@ -667,25 +700,39 @@ public actor DiffusionPipeline<
 
       // Evaluate to ensure computation runs
       eval(latents)
+
+      // Telemetry: denoiseStep — hot-path, fires every step.
+      // Payload is three primitive Ints; no String allocation, no MemoryManager call.
+      await emit(.denoiseStep(stepIndex: stepIndex, totalSteps: totalSteps, timestep: timestep))
     }
 
     // --- Step 5: Decode latents ---
     progress(.decoding)
+    let decodeStartTime = Date()
+    // Telemetry: decodeStart — immediately before decoder.decode(latents).
+    await emit(.decodeStart(latentShape: latents.shape))
     let decodedOutput: DecodedOutput
     do {
       decodedOutput = try decoder.decode(latents)
     } catch {
       throw PipelineError.decodingFailed(reason: String(describing: error))
     }
+    // Telemetry: decodeComplete — after decoding succeeds.
+    await emit(.decodeComplete(durationSeconds: Date().timeIntervalSince(decodeStartTime)))
 
     // --- Step 6: Render output ---
     progress(.rendering)
+    let renderStartTime = Date()
+    // Telemetry: renderStart — before renderer.render(decodedOutput).
+    await emit(.renderStart)
     let renderedOutput: RenderedOutput
     do {
       renderedOutput = try renderer.render(decodedOutput)
     } catch {
       throw PipelineError.renderingFailed(reason: String(describing: error))
     }
+    // Telemetry: renderComplete — after rendering succeeds.
+    await emit(.renderComplete(durationSeconds: Date().timeIntervalSince(renderStartTime)))
 
     // LoRA: restore base weights after generation by subtracting the adapter delta.
     if let adapterWeights = loraAdapterWeights, let loraConfig = request.loRA,
@@ -701,6 +748,14 @@ public actor DiffusionPipeline<
 
     let duration = Date().timeIntervalSince(startTime)
     progress(.complete(duration: duration))
+
+    // Telemetry: generateComplete — at generate() exit; totalDurationSeconds matches
+    // DiffusionGenerationResult.duration (both use the same `duration` value).
+    await emit(.generateComplete(
+      totalDurationSeconds: duration,
+      seed: actualSeed,
+      steps: totalSteps
+    ))
 
     return DiffusionGenerationResult(
       output: renderedOutput,
