@@ -88,10 +88,17 @@ SwiftTuberia provides opt-in telemetry so you can observe pipeline load, generat
 To attach a reporter:
 
 ```swift
+let reporter = MyReporter()
 let pipeline = try DiffusionPipeline(recipe: recipe)
-await pipeline.setTelemetry(MyReporter())   // optional
+await pipeline.setTelemetry(reporter)                 // pipeline load/generate/unload events
+await MemoryManager.shared.setTelemetry(reporter)     // Metal-bytes probe on clearGPUCache
 try await pipeline.loadModels(progress: { _, _ in })
 ```
+
+`DiffusionPipeline.setTelemetry` and `MemoryManager.shared.setTelemetry` are independent — the
+pipeline does **not** auto-forward to the MemoryManager singleton. If you only want load/generate
+events and not the terminal `unloadSegment(role: nil, …)` Metal-bytes probe, calling only
+`pipeline.setTelemetry` is sufficient. Call both when you need the full event stream.
 
 Events are defined in the `TuberiaTelemetryEvent` enum and span four categories: lifecycle (`loadStart`, `memoryGate`, `segmentLoadStart`, etc.), generation (`generateStart`, `denoiseStep`, `decodeComplete`, etc.), LoRA (`loraLoadStart`, `loraMerge`, `loraUnmerge`), and errors (`errorThrown`).
 

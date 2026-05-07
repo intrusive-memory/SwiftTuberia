@@ -258,10 +258,17 @@ By default, the pipeline reports nothing. When no reporter is attached, `telemet
 Consumers attach a reporter via:
 
 ```swift
+let reporter = MyReporter()
 let pipeline = try DiffusionPipeline(recipe: recipe)
-await pipeline.setTelemetry(MyReporter())   // optional
+await pipeline.setTelemetry(reporter)                 // pipeline load/generate/unload events
+await MemoryManager.shared.setTelemetry(reporter)     // Metal-bytes probe on clearGPUCache
 try await pipeline.loadModels(progress: { _, _ in })
 ```
+
+`DiffusionPipeline.setTelemetry` and `MemoryManager.shared.setTelemetry` are **independent** —
+the pipeline does not auto-forward to the `MemoryManager` singleton. Call both to observe the
+full event stream including the terminal `unloadSegment(role: nil, …)` Metal-bytes probe from
+`clearGPUCache`. If you only need load/generate events, `pipeline.setTelemetry` alone is sufficient.
 
 See `Tests/TuberiaTests/Telemetry/MockTuberiaTelemetryReporter.swift` for a concrete example reporter.
 
