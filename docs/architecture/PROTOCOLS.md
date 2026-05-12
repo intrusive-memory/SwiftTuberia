@@ -1,6 +1,6 @@
 # SwiftTuberia — Protocols Architecture
 
-**Companion to**: [`../requirements/PROTOCOLS.md`](../requirements/PROTOCOLS.md)
+**Companion to**: [`../complete/requirements/PROTOCOLS.md`](../complete/requirements/PROTOCOLS.md)
 **Target**: `Tuberia`
 
 ---

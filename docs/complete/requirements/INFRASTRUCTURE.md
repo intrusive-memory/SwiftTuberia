@@ -1,6 +1,6 @@
 # SwiftTuberia — Infrastructure Services
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Shared services available to all pipe segments and pipelines — model access via SwiftAcervo, WeightLoader, MemoryManager, DeviceCapability, and Progress Reporter. This document contains both the design rationale and the canonical Swift definitions.
 
 ---

@@ -3,7 +3,7 @@ title: "SwiftTuberia — SwiftAcervo v2 Integration Requirements"
 date: 2026-04-20
 status: "ACTIVE — partially implemented"
 master_index: "/Users/stovak/Projects/REQUIREMENTS.md"
-audit_source: "AUDIT_FINDINGS.md (Sorties T1–T5)"
+audit_source: "docs/complete/AUDIT_FINDINGS.md (Sorties T1–T5)"
 ---
 
 # SwiftTuberia — SwiftAcervo v2 Integration Requirements
@@ -17,8 +17,8 @@ verification and standardized CDN workflows.
 `AcervoError.integrityCheckFailed`, etc.)
 
 **Architectural context**: See `docs/incomplete/REQUIREMENTS_ARCHITECTURE.md` (plumbing
-system overview), `requirements/` (pipe segment contracts, pipeline, catalog), and
-`architecture/` (companion architecture notes).
+system overview), `docs/complete/requirements/` (pipe segment contracts, pipeline, catalog), and
+`docs/architecture/` (companion architecture notes).
 
 ---
 
@@ -110,7 +110,7 @@ changes required; all tests still pass.
 
 **Priority**: 🔴 CRITICAL — without this, `DiffusionPipeline.loadModels` throws
 `componentNotDownloaded` on first use and never auto-downloads, violating both
-`requirements/PROTOCOLS.md:16` and `architecture/PROTOCOLS.md:40`.
+`docs/complete/requirements/PROTOCOLS.md:16` and `docs/architecture/PROTOCOLS.md:40`.
 
 **Files**:
 - `Sources/Tuberia/Pipeline/DiffusionPipeline.swift:173-217`
@@ -140,7 +140,7 @@ the documented soft/hard guard.
 **Files**:
 - `Sources/Tuberia/Pipeline/DiffusionPipeline.swift:173-217`
 - `Sources/Tuberia/Infrastructure/MemoryManager.swift:81-99`
-- `requirements/INFRASTRUCTURE.md:154-218`
+- `docs/complete/requirements/INFRASTRUCTURE.md:154-218`
 
 **Work**:
 1. At entry to `loadModels(progress:)`, compute the peak-memory requirement from
@@ -152,7 +152,7 @@ the documented soft/hard guard.
 3. Alternatively, if phased loading is the intended path, call
    `softCheck(requiredBytes: peak)`; on `false`, switch to per-phase `hardValidate`
    before each phase (encoder first, then backbone+decoder).
-4. Document the chosen strategy inline and update `requirements/INFRASTRUCTURE.md` if
+4. Document the chosen strategy inline and update `docs/complete/requirements/INFRASTRUCTURE.md` if
    the design changed.
 
 **Exit**: A unit test that stubs `MemoryManager.availableMemory` below the pipeline's
@@ -251,15 +251,15 @@ the next workflow run to fail with a diff-style error; reverting the edit passes
 
 **Files**:
 - `AGENTS.md` (Recent Changes section)
-- `architecture/PROTOCOLS.md`, `architecture/INFRASTRUCTURE.md`
-- `requirements/INFRASTRUCTURE.md` ("Audit Checklist" section already claims items are
+- `docs/architecture/PROTOCOLS.md`, `docs/architecture/INFRASTRUCTURE.md`
+- `docs/complete/requirements/INFRASTRUCTURE.md` ("Audit Checklist" section already claims items are
   complete — re-verify each one post-T4/T5)
 
 **Work**:
 1. Add a v0.3.7 (or next) changelog entry summarizing: minimum Acervo bump, per-file
    checksums added, ensureComponentReady in load path, hardValidate wired in, positional
    findComponentId replaced.
-2. Update `requirements/INFRASTRUCTURE.md:209-218` "Audit Checklist" to reflect the true
+2. Update `docs/complete/requirements/INFRASTRUCTURE.md:209-218` "Audit Checklist" to reflect the true
    state of each item after the above sorties land (several currently marked `[x]` that
    are not actually implemented — e.g. `MemoryManager.hardValidate()` called before
    loading).
@@ -272,7 +272,7 @@ integration state without running `grep`.
 
 ## Non-Blocking / Deferred Items
 
-Captured from `AUDIT_FINDINGS.md` "Non-Blocking Items" plus new observations:
+Captured from `docs/complete/AUDIT_FINDINGS.md` "Non-Blocking Items" plus new observations:
 
 - **LoRA descriptor checksums** — when LoRAs are ever shipped via CDN (not just local
   paths), they need the same SHA-256 treatment. Today LoRA entries use `componentId` only
@@ -281,7 +281,7 @@ Captured from `AUDIT_FINDINGS.md` "Non-Blocking Items" plus new observations:
 - **Model-plugin backbones** (pixart-swift-mlx, flux-2-swift-mlx) register their own
   `ComponentDescriptor`s. They must apply REQ-T4 independently in their own repos; this
   REQUIREMENTS.md does not govern them.
-- **`CLIPEncoder`, `DDPMScheduler`** — declared in `requirements/CATALOG.md` but not yet
+- **`CLIPEncoder`, `DDPMScheduler`** — declared in `docs/complete/requirements/CATALOG.md` but not yet
   implemented. Out of scope for v2 integration; create their descriptors when those
   components land.
 - **`Renderer` components** (`ImageRenderer`, `AudioRenderer`) — weightless, need no
@@ -293,12 +293,12 @@ Captured from `AUDIT_FINDINGS.md` "Non-Blocking Items" plus new observations:
 
 - **Master mission index**: `/Users/stovak/Projects/REQUIREMENTS.md` (Work Unit 2,
   Sorties 2.1–2.3)
-- **Audit source**: `AUDIT_FINDINGS.md` (Sorties T1–T5) — upon completion of REQ-T4 and
+- **Audit source**: `docs/complete/AUDIT_FINDINGS.md` (Sorties T1–T5) — upon completion of REQ-T4 and
   REQ-T5, mark the T4/T5 exit criteria checked.
 - **Upstream SwiftAcervo API**: `/Users/stovak/Projects/SwiftAcervo/API_REFERENCE.md`
 - **Architectural spec**: `docs/incomplete/REQUIREMENTS_ARCHITECTURE.md`,
-  `requirements/{PROTOCOLS,PIPELINE,CATALOG,INFRASTRUCTURE,TESTING,TEST_COVERAGE_GAPS,INFERENCE}.md`,
-  `architecture/{PROTOCOLS,PIPELINE,CATALOG,INFRASTRUCTURE}.md`
+  `docs/complete/requirements/{PROTOCOLS,PIPELINE,CATALOG,INFRASTRUCTURE,TESTING,TEST_COVERAGE_GAPS,INFERENCE}.md`,
+  `docs/architecture/{PROTOCOLS,PIPELINE,CATALOG,INFRASTRUCTURE}.md`
 
 ---
 
@@ -323,5 +323,5 @@ SwiftTuberia's SwiftAcervo v2 integration is **complete** when:
 
 | Date | Event |
 |------|-------|
-| 2026-04-18 | `AUDIT_FINDINGS.md` created with Sorties T1–T5. |
+| 2026-04-18 | `docs/complete/AUDIT_FINDINGS.md` created with Sorties T1–T5. |
 | 2026-04-20 | This file created. T1–T3 verified complete; T4 (checksums), T5 (dependency floor), and three new sorties (REQ-PIPE-01/02/03, REQ-INT-01, REQ-CDN-01, REQ-DOC-01) identified as outstanding. |

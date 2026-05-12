@@ -2,11 +2,20 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.5
+**Version**: 0.7.0
 
 ---
 
 ## Recent Changes
+
+### v0.7.0 — Telemetry instrumentation (GLASS PIPES) + SwiftAcervo floor bump
+
+Minor release adding a structured telemetry surface across the diffusion pipeline plus a SwiftAcervo dependency bump.
+
+- **Telemetry events** (`TuberiaTelemetryEvent`, `TuberiaTelemetryReporter`, `TuberiaTensorStat`): emit lifecycle, assembly, memory, weight, LoRA, text-encoder, scheduler, denoise-loop, CFG-cast, anomaly, backbone/decoder/renderer events from the diffusion pipeline. Reporters are injectable via defaulted parameters; passing nothing is a no-op.
+- **Five instrumented protocol seams**: assembly, denoise loop, CFG cast, anomaly detection, LoRA loading. See `Sources/Tuberia/Pipeline/DiffusionPipeline+Telemetry.swift`.
+- **SwiftAcervo floor bump**: `0.11.1` → `0.13.0`.
+- **swift-tokenizers pin**: held at `0.5.x` (upstream `0.6.x` ships broken FFI).
 
 ### v0.6.5 — swift-tokenizers 0.5.0 floor bump (broken-resolution fix)
 
@@ -169,7 +178,7 @@ Two products:
 
 Documentation:
 - [REQUIREMENTS.md](REQUIREMENTS.md) — active mission scope
-- [GENERATION_PATHS.md](GENERATION_PATHS.md) — generation path analysis
+- [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — generation path analysis
 
 ## Dependencies
 
@@ -197,7 +206,7 @@ Available schemes: `SwiftTuberia-Package`, `Tuberia`, `TuberiaCatalog`. Run `xco
 `xcodebuild test` must be invoked with `-parallel-testing-enabled NO`. MLX owns a process-global Metal GPU stream, and Swift Testing's default cross-suite parallelism races on the shared command buffer, producing `-[_MTLCommandBuffer addCompletedHandler:] 'Completed handler provided after commit call'` and aborting the process. Suite-level `.serialized` traits only serialize tests within a suite — they do not prevent sibling suites from running concurrently. `make test` and the CI workflow already apply this flag; any ad-hoc `xcodebuild test` invocation must set it too.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
-See [GENERATION_PATHS.md](GENERATION_PATHS.md) for generation path analysis.
+See [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) for generation path analysis.
 
 ---
 

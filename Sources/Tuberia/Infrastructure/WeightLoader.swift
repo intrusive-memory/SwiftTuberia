@@ -27,6 +27,10 @@ public struct WeightLoader: Sendable {
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform applied after key remapping, before quantization.
   ///   - quantization: Quantization strategy to apply to loaded tensors.
+  ///   - telemetry: Optional telemetry reporter forwarded from
+  ///     `DiffusionPipeline`. Defaults to `nil` so existing call sites compile
+  ///     unchanged. Sortie 3+ will wire `weightLoadStart` / `weightLoadComplete`
+  ///     / `errorThrown` against this parameter.
   /// - Returns: Remapped, optionally quantized parameter tensors ready for module assignment.
   /// - Throws: `PipelineError.modelNotDownloaded` if the component is not ready in Acervo.
   ///           `PipelineError.weightLoadingFailed` on parse or I/O errors.
@@ -34,7 +38,8 @@ public struct WeightLoader: Sendable {
     componentId: String,
     keyMapping: KeyMapping,
     tensorTransform: TensorTransform? = nil,
-    quantization: QuantizationConfig = .asStored
+    quantization: QuantizationConfig = .asStored,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
     do {
       let result = try await AcervoManager.shared.withComponentAccess(componentId) {
@@ -47,7 +52,9 @@ public struct WeightLoader: Sendable {
         do {
           effectiveURLs = try handle.urls(matching: ".safetensors")
         } catch {
-          // No safetensors files found in descriptor
+          // No safetensors files found in descriptor.
+          // errorThrown is emitted in the outer catch since the closure is synchronous
+          // and cannot await telemetry.capture(_:).
           throw PipelineError.weightLoadingFailed(
             component: componentId,
             reason: "Component descriptor has no .safetensors files: \(error)"
@@ -57,6 +64,7 @@ public struct WeightLoader: Sendable {
         print("[WeightLoader] effective safetensors count: \(effectiveURLs.count)")
 
         guard !effectiveURLs.isEmpty else {
+          // errorThrown emitted in outer catch (closure is synchronous, cannot await).
           throw PipelineError.weightLoadingFailed(
             component: componentId,
             reason: "No .safetensors files found in component directory"
@@ -93,24 +101,73 @@ public struct WeightLoader: Sendable {
       return result
 
     } catch let error as PipelineError {
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: String(describing: error),
+            stepIndex: nil
+          ))
+      }
       throw error
     } catch AcervoError.componentNotDownloaded(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not downloaded: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.componentNotRegistered(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not registered: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.componentNotHydrated(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not hydrated: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
-      throw PipelineError.weightLoadingFailed(
-        component: componentId,
-        reason:
-          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
-      )
+      let reason =
+        "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+      let mappedError = PipelineError.weightLoadingFailed(component: componentId, reason: reason)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: reason,
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch {
-      throw PipelineError.weightLoadingFailed(
-        component: componentId,
-        reason: String(describing: error)
-      )
+      let reason = String(describing: error)
+      let mappedError = PipelineError.weightLoadingFailed(component: componentId, reason: reason)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: reason,
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     }
   }
 

@@ -1,6 +1,6 @@
 # SwiftTuberia — Testing Strategy
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Testing requirements for both the `Tuberia` and `TuberiaCatalog` targets.
 
 ---

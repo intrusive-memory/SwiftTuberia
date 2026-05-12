@@ -1,6 +1,6 @@
 # SwiftTuberia — Pipeline Architecture
 
-**Companion to**: [`../requirements/PIPELINE.md`](../requirements/PIPELINE.md)
+**Companion to**: [`../complete/requirements/PIPELINE.md`](../complete/requirements/PIPELINE.md)
 **Target**: `Tuberia`
 
 ---

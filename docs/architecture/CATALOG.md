@@ -1,6 +1,6 @@
 # SwiftTuberia — Catalog Architecture
 
-**Companion to**: [`../requirements/CATALOG.md`](../requirements/CATALOG.md)
+**Companion to**: [`../complete/requirements/CATALOG.md`](../complete/requirements/CATALOG.md)
 **Target**: `TuberiaCatalog`
 
 ---

@@ -1,6 +1,6 @@
 # SwiftTuberia
 
-**v0.6.5** — Componentized generation pipeline for MLX inference.
+**v0.7.0** — Componentized generation pipeline for MLX inference.
 
 ## Overview
 
@@ -26,7 +26,7 @@ Add SwiftTuberia to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.6.5")
+    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.7.0")
 ]
 ```
 
@@ -85,7 +85,7 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 
 - [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
 - [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
-- [GENERATION_PATHS.md](GENERATION_PATHS.md) — Generation path analysis
+- [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — Generation path analysis
 
 ## License
 

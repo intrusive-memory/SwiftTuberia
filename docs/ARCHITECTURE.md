@@ -1,6 +1,6 @@
 # SwiftTuberia — Architecture (Ecosystem Interface Reference)
 
-**Companion to**: [`REQUIREMENTS.md`](REQUIREMENTS.md)
+**Companion to**: [`REQUIREMENTS.md`](../REQUIREMENTS.md)
 **Role in ecosystem**: Central pipeline system. Provides protocols, infrastructure, and shared components.
 
 ---
