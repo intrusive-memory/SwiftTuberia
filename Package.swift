@@ -62,9 +62,14 @@ let package = Package(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
       from: "0.11.1"),
+    // Pinned to 0.5.x: the 0.6.0 release (2026-05-09) ships generated
+    // TokenizersFFI bindings that reference RustBuffer/RustCallStatus/
+    // ForeignBytes runtime types missing from the package — CI fails with
+    // "cannot find type 'RustBuffer' in scope". Revisit when upstream
+    // publishes a 0.6.x with a working artifact bundle.
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMajor(from: "0.5.0")),
+      .upToNextMinor(from: "0.5.0")),
   ],
   targets: [
     .target(
