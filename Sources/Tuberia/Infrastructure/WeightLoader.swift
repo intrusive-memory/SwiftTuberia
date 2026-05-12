@@ -27,6 +27,10 @@ public struct WeightLoader: Sendable {
   ///   - keyMapping: Closure mapping safetensors keys to module keys. Return `nil` to skip a key.
   ///   - tensorTransform: Optional per-tensor transform applied after key remapping, before quantization.
   ///   - quantization: Quantization strategy to apply to loaded tensors.
+  ///   - telemetry: Optional telemetry reporter forwarded from
+  ///     `DiffusionPipeline`. Defaults to `nil` so existing call sites compile
+  ///     unchanged. Sortie 3+ will wire `weightLoadStart` / `weightLoadComplete`
+  ///     / `errorThrown` against this parameter.
   /// - Returns: Remapped, optionally quantized parameter tensors ready for module assignment.
   /// - Throws: `PipelineError.modelNotDownloaded` if the component is not ready in Acervo.
   ///           `PipelineError.weightLoadingFailed` on parse or I/O errors.
@@ -34,8 +38,11 @@ public struct WeightLoader: Sendable {
     componentId: String,
     keyMapping: KeyMapping,
     tensorTransform: TensorTransform? = nil,
-    quantization: QuantizationConfig = .asStored
+    quantization: QuantizationConfig = .asStored,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
+    // Plumbing only — no emission yet (Sortie 2).
+    _ = telemetry
     do {
       let result = try await AcervoManager.shared.withComponentAccess(componentId) {
         handle -> ModuleParameters in

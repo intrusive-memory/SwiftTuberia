@@ -64,8 +64,50 @@ public actor DiffusionPipeline<
   /// Strategy: single up-front `hardValidate(peakMemoryBytes)` (REQ-PIPE-02, S4).
   /// Phased-loading with `softCheck` per phase is deferred to a future sortie —
   /// real peak-vs-phase divergence has not been observed in production workloads.
-  var memoryGate: @Sendable (UInt64) async throws -> Void = { requiredBytes in
-    try await MemoryManager.shared.hardValidate(requiredBytes: requiredBytes)
+  ///
+  /// Sortie 2 (OPERATION GLASS PIPES) widened the gate signature to take a
+  /// `telemetry` parameter so the default closure can forward it to
+  /// `MemoryManager.hardValidate(requiredBytes:telemetry:)`. The public
+  /// `setMemoryGate(_:)` seam still accepts the legacy
+  /// `(UInt64) async throws -> Void` shape — internally the actor wraps any
+  /// custom gate to fit the new two-argument shape so existing test stubs
+  /// compile unchanged.
+  var memoryGate: @Sendable (UInt64, (any TuberiaTelemetryReporter)?) async throws -> Void = {
+    requiredBytes, telemetry in
+    try await MemoryManager.shared.hardValidate(
+      requiredBytes: requiredBytes,
+      telemetry: telemetry
+    )
+  }
+
+  // MARK: - Telemetry Seam (OPERATION GLASS PIPES Sortie 2)
+
+  /// Telemetry reporter installed via `setTelemetry(_:)`.
+  ///
+  /// Defaults to `nil` so the pipeline is zero-cost when telemetry is off; the
+  /// emission sites added in later sorties gate every `TuberiaTensorStat.sample`
+  /// behind an `if let telemetry { ... }` guard so the eight MLX reductions per
+  /// stat never execute when this ivar is `nil`. The reporter type uses the
+  /// existential `(any TuberiaTelemetryReporter)?` form required by Swift 6.
+  ///
+  /// All emission sites are inside actor-isolated methods, so reading this
+  /// ivar requires no further synchronization.
+  ///
+  /// Declared `private` per §4.1; the `setTelemetry(_:)` public surface lives
+  /// in `DiffusionPipeline+Telemetry.swift` and writes through the
+  /// `installTelemetry(_:)` forwarder below (cross-file Swift extensions cannot
+  /// reach `private` members directly).
+  private var telemetry: (any TuberiaTelemetryReporter)? = nil
+
+  /// Internal writer for the `telemetry` ivar. Called by the public
+  /// `setTelemetry(_:)` extension in `DiffusionPipeline+Telemetry.swift`.
+  ///
+  /// This indirection exists only because Swift `private` does not cross file
+  /// boundaries: the extension file cannot assign to `self.telemetry` directly.
+  /// Keeping the ivar `private` (per §4.1) and routing the write through this
+  /// `internal` helper preserves the encapsulation intent.
+  func installTelemetry(_ reporter: (any TuberiaTelemetryReporter)?) {
+    self.telemetry = reporter
   }
 
   // MARK: - Init
@@ -188,8 +230,16 @@ public actor DiffusionPipeline<
   /// insufficient memory without querying real hardware.
   ///
   /// Call this on the actor before invoking `loadModels(progress:)`.
+  ///
+  /// Accepts the legacy `(UInt64) async throws -> Void` shape for source
+  /// compatibility (Sortie 2 widened the underlying gate type to also accept a
+  /// telemetry reporter — see `memoryGate`). Custom gates installed through
+  /// this seam never see the telemetry reporter, by design: test stubs that
+  /// simulate memory pressure have no business emitting telemetry.
   public func setMemoryGate(_ gate: @escaping @Sendable (UInt64) async throws -> Void) {
-    memoryGate = gate
+    memoryGate = { requiredBytes, _ in
+      try await gate(requiredBytes)
+    }
   }
 
   // MARK: - GenerationPipeline Conformance
@@ -221,7 +271,11 @@ public actor DiffusionPipeline<
     // and surfaces directly to the caller without wrapping (MemoryManager already throws it).
     let peak = _memoryRequirement.peakMemoryBytes
     do {
-      try await memoryGate(peak)
+      // Pass the installed telemetry reporter through to the gate — the
+      // default gate forwards it to `MemoryManager.hardValidate`; custom
+      // gates installed via `setMemoryGate(_:)` discard the reporter (test
+      // stubs do not emit telemetry).
+      try await memoryGate(peak, telemetry)
     } catch let error as PipelineError {
       // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
       throw error
