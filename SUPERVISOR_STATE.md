@@ -36,14 +36,12 @@
 
 ### swift-tuberia-instrumentation
 
-- Work unit state: RUNNING — awaiting PR open
-- Current sortie: 7 of 7 (overhead test REMOVED as unmeasurable; PR open is the remaining task)
-- Sortie state: PARTIAL → resolving into supervisor-direct PR open
+- Work unit state: **COMPLETED** — PR open, awaiting review/merge
+- Current sortie: all 7 (+ 3.5 patch) COMPLETED
+- Sortie state: COMPLETED
 - Sortie type: code + PR composition
-- Model: n/a (supervisor handles PR open directly; the test work itself is complete via the removal)
-- Attempt: 1 of 3
-- Last verified: Sortie 7 commit 33bef96 added overhead test that failed honestly at +1381%. User decision: remove the test entirely — it didn't measure what it claimed (it measured Noop emission cost, not telemetry-off cost). Test deleted; REQUIREMENTS §7 and §10 updated to reflect the structural-proof approach for the zero-cost-when-nil invariant.
-- Notes: The `if let telemetry` guard discipline IS the zero-cost invariant; structurally verified by Sortie 5 + Sortie 6 audits. No wall-clock perf test gates this.
+- Last verified: 47 tests pass, build/lint clean. PR opened at https://github.com/intrusive-memory/SwiftTuberia/pull/35 (instrumentation/01 → main). Post-merge work: tag with our next minor release version so downstream libs (flux-2-swift-mlx, pixart-swift-mlx, SwiftVinetas) can pin.
+- Notes: Mission complete pending external review. Next supervisor invocation should be `/mission-supervisor brief` to harvest lessons learned, then `clean` to archive artifacts under `docs/complete/glass-pipes/`.
 
 ## Post-merge cleanup queue (not blocking the mission)
 
@@ -68,7 +66,7 @@
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 7 | PARTIAL → COMPLETED (supervisor cleanup) | 1/3 | sonnet | 8 | a7474e7880faec27e | (transcript — do not read) | 2026-05-12 |
+| _(no active agents — mission COMPLETED)_ | | | | | | | | |
 
 ## Decisions Log
 
@@ -90,6 +88,14 @@
 
 ## Overall Status
 
-**State**: RUNNING — Sorties 1+2+3 COMPLETED ✓. Sortie 3.5 (sonnet, async) dispatching the init-telemetry fix.
+**State**: **COMPLETED** — all sorties landed, PR open, awaiting review/merge.
 
-**Next action**: When Sortie 3.5 completes, run verification and dispatch Sortie 4 (text-encoder + scheduler emission). Sortie 4 is unaffected by the init issue and was always going to chain after this.
+**Final commit on branch**: `62b86ea` (instrumentation/01).
+**PR**: https://github.com/intrusive-memory/SwiftTuberia/pull/35
+**Tests**: 47 passing (TuberiaTests target).
+
+**Next action (post-merge, supervisor)**:
+1. `gh pr merge 35 --squash` (or `--merge` if you prefer the verbose history)
+2. Tag the merged commit on `main` with our next minor release version
+3. `/mission-supervisor brief` — harvest mission lessons into `OPERATION_GLASS_PIPES_01_BRIEF.md`
+4. `clean` auto-triggers via `brief` — archives `EXECUTION_PLAN.md`, `SUPERVISOR_STATE.md`, and the brief into `docs/complete/glass-pipes/`
