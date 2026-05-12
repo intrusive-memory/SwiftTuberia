@@ -169,7 +169,7 @@ Two products:
 
 Documentation:
 - [REQUIREMENTS.md](REQUIREMENTS.md) — active mission scope
-- [GENERATION_PATHS.md](GENERATION_PATHS.md) — generation path analysis
+- [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — generation path analysis
 
 ## Dependencies
 
@@ -197,7 +197,7 @@ Available schemes: `SwiftTuberia-Package`, `Tuberia`, `TuberiaCatalog`. Run `xco
 `xcodebuild test` must be invoked with `-parallel-testing-enabled NO`. MLX owns a process-global Metal GPU stream, and Swift Testing's default cross-suite parallelism races on the shared command buffer, producing `-[_MTLCommandBuffer addCompletedHandler:] 'Completed handler provided after commit call'` and aborting the process. Suite-level `.serialized` traits only serialize tests within a suite — they do not prevent sibling suites from running concurrently. `make test` and the CI workflow already apply this flag; any ad-hoc `xcodebuild test` invocation must set it too.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
-See [GENERATION_PATHS.md](GENERATION_PATHS.md) for generation path analysis.
+See [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) for generation path analysis.
 
 ---
 

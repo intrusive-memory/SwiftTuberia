@@ -1,10 +1,10 @@
 # SwiftTuberia — Inference Implementation Requirements
 
-**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Replace all placeholder/stub implementations with real neural network forward passes, tokenizer integration, LoRA wiring, and img2img support. This document covers every gap between the current codebase and a working inference pipeline.
 **Status**: DRAFT
 **Date**: 2026-03-26
-**Predecessor**: [Execution Plan 01](../docs/complete/swifttuberia-pipeline-system-01-execution-plan.md) (pipeline plumbing — complete)
+**Predecessor**: [Execution Plan 01](../swifttuberia-pipeline-system-01-execution-plan.md) (pipeline plumbing — complete)
 
 ---
 

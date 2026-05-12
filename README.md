@@ -85,7 +85,7 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 
 - [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
 - [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
-- [GENERATION_PATHS.md](GENERATION_PATHS.md) — Generation path analysis
+- [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — Generation path analysis
 
 ## License
 
