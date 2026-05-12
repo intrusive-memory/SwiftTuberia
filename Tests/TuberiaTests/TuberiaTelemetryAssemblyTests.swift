@@ -201,15 +201,30 @@ private typealias AssemblyPipeline = DiffusionPipeline<
 @Suite("TuberiaTelemetryAssemblyTests — §7 row 1", .serialized)
 struct TuberiaTelemetryAssemblyTests {
 
+  /// Poll the recorder for up to `timeout` seconds, returning the first set of
+  /// captured events that satisfies `predicate`. Fixed-count `Task.yield()`
+  /// drains race the cooperative executor under CI load; this polls until the
+  /// expected emissions are observed or the deadline expires.
+  private func waitForEvents(
+    in rec: RecordingTelemetryReporter,
+    timeout: TimeInterval = 2.0,
+    until predicate: ([TuberiaTelemetryEvent]) -> Bool
+  ) async -> [TuberiaTelemetryEvent] {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      let snapshot = await rec.events
+      if predicate(snapshot) { return snapshot }
+      await Task.yield()
+    }
+    return await rec.events
+  }
+
   // MARK: - (a) Mismatched recipe: assemblyCheckFailed fires before throw
 
   @Test("assemblyCheckFailed(.encoderToBackboneDim) fires before PipelineError is thrown")
   func assemblyCheckFailedFiresBeforeThrow() async throws {
     let rec = RecordingTelemetryReporter()
 
-    // The pipeline init throws synchronously; the telemetry Task{} is scheduled
-    // before the throw returns to the caller. Yield after the init to let the
-    // scheduled tasks run.
     var caughtError: Error?
     do {
       _ = try AssemblyPipeline(recipe: MismatchedDimRecipe(), telemetry: rec)
@@ -231,16 +246,15 @@ struct TuberiaTelemetryAssemblyTests {
       Issue.record("Expected PipelineError, got \(String(describing: caughtError))")
     }
 
-    // Drain the Task{} scheduled inside validateAssembly before the throw.
-    // A few yields are usually enough; the task is scheduled on the cooperative
-    // pool and completes promptly on the same thread in tests.
-    for _ in 0..<10 {
-      await Task.yield()
+    // Wait for at least one assemblyCheckFailed(.encoderToBackboneDim) event.
+    // validateAssembly schedules the emission via Task {} before throwing.
+    let events = await waitForEvents(in: rec) { snapshot in
+      snapshot.contains { event in
+        if case .assemblyCheckFailed(.encoderToBackboneDim, _, _, _) = event { return true }
+        return false
+      }
     }
 
-    let events = await rec.events
-
-    // Must have at least one assemblyCheckFailed event
     let failedEvents = events.compactMap { event -> TuberiaTelemetryEvent.AssemblyCheck? in
       if case .assemblyCheckFailed(let check, _, _, _) = event { return check } else { return nil }
     }
@@ -251,10 +265,10 @@ struct TuberiaTelemetryAssemblyTests {
     )
   }
 
-  // MARK: - (b) Valid recipe: all six assemblyCheckPassed events fire in order
+  // MARK: - (b) Valid recipe: all six assemblyCheckPassed events fire
 
-  @Test("All six assemblyCheckPassed events fire in expected order for a valid recipe")
-  func allSixAssemblyCheckPassedEventsFireInOrder() async throws {
+  @Test("All six assemblyCheckPassed events fire for a valid recipe")
+  func allSixAssemblyCheckPassedEventsFire() async throws {
     let rec = RecordingTelemetryReporter()
 
     // Valid recipe — init should succeed
@@ -262,17 +276,21 @@ struct TuberiaTelemetryAssemblyTests {
     // Keep pipeline in scope so it isn't deallocated before the Task{} fires
     _ = pipeline
 
-    // Drain Task{} emissions from validateAssembly
-    for _ in 0..<10 {
-      await Task.yield()
+    // Wait until all six assemblyCheckPassed events have been captured.
+    // Each check is emitted via its own Task{} inside validateAssembly; the
+    // cooperative executor does not guarantee inter-Task ordering, so we wait
+    // for completion of all six rather than for any particular sequence.
+    let events = await waitForEvents(in: rec) { snapshot in
+      let passed = snapshot.compactMap { event -> TuberiaTelemetryEvent.AssemblyCheck? in
+        if case .assemblyCheckPassed(let check, _, _) = event { return check } else { return nil }
+      }
+      return Set(passed).count == 6
     }
 
-    let events = await rec.events
     let passedChecks = events.compactMap { event -> TuberiaTelemetryEvent.AssemblyCheck? in
       if case .assemblyCheckPassed(let check, _, _) = event { return check } else { return nil }
     }
 
-    // All six checks must have fired
     let expectedChecks: [TuberiaTelemetryEvent.AssemblyCheck] = [
       .completeness,
       .encoderToBackboneDim,
@@ -288,11 +306,6 @@ struct TuberiaTelemetryAssemblyTests {
       )
     }
 
-    // All six unique checks must be present.
-    // Note: Each check is emitted via its own Task{} dispatch inside validateAssembly.
-    // The Swift cooperative executor does not guarantee inter-Task ordering between
-    // independent Task{} instances, so strict sequential ordering is not asserted.
-    // The count and presence of all six checks are the load-bearing assertions.
     #expect(
       passedChecks.count == 6,
       "Expected exactly 6 assemblyCheckPassed events, got \(passedChecks.count): \(passedChecks)"

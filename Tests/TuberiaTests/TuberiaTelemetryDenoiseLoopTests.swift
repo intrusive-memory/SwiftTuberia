@@ -217,26 +217,25 @@ typealias DenoisePipeline = DiffusionPipeline<
 @Suite("TuberiaTelemetryDenoiseLoopTests — §7 row 2", .serialized)
 struct TuberiaTelemetryDenoiseLoopTests {
 
-  // MARK: - Setup helpers
-
-  /// Build a no-CFG pipeline with the recorder attached.
   private func makePipeline(rec: RecordingTelemetryReporter) async throws -> DenoisePipeline {
     let pipeline = try DenoisePipeline(recipe: DenoiseNoCFGRecipe(), telemetry: rec)
-    // Skip loadModels — components are pre-loaded
     await pipeline.setMemoryGate { _ in /* no-op */ }
     return pipeline
   }
 
-  // MARK: - 4-step denoise assertions
-
-  @Test("4× denoiseStepStart and 4× denoiseStepComplete fire in 4-step run")
-  func fourStepDenoiseEmitsFourStartAndFourComplete() async throws {
+  @Test(
+    "4-step denoise emits paired start/complete events with monotone stepIndex and correct latent shape"
+  )
+  func fourStepDenoiseTelemetry() async throws {
     MLXRandom.seed(42)
     let rec = RecordingTelemetryReporter()
     let pipeline = try await makePipeline(rec: rec)
 
+    // width=64, height=64 → latentHeight=8, latentWidth=8, channels=4
+    // latent shape: [1, 8, 8, 4]
+    let expectedShape = [1, 8, 8, 4]
     let request = DiffusionGenerationRequest(
-      prompt: "a test prompt",
+      prompt: "denoise telemetry test",
       width: 64, height: 64,
       steps: 4,
       guidanceScale: 1.0,  // no CFG
@@ -252,56 +251,6 @@ struct TuberiaTelemetryDenoiseLoopTests {
     let completes = events.compactMap { e -> Int? in
       if case .denoiseStepComplete(let idx, _, _, _, _, _, _) = e { return idx } else { return nil }
     }
-
-    #expect(starts.count == 4, "Expected 4 denoiseStepStart events, got \(starts.count)")
-    #expect(completes.count == 4, "Expected 4 denoiseStepComplete events, got \(completes.count)")
-  }
-
-  @Test("stepIndex is monotonically increasing across denoiseStepStart events")
-  func stepIndexIsMonotone() async throws {
-    MLXRandom.seed(42)
-    let rec = RecordingTelemetryReporter()
-    let pipeline = try await makePipeline(rec: rec)
-
-    let request = DiffusionGenerationRequest(
-      prompt: "monotone test",
-      width: 64, height: 64,
-      steps: 4,
-      guidanceScale: 1.0,
-      seed: 1
-    )
-    _ = try await pipeline.generate(request: request, progress: { _ in })
-
-    let events = await rec.events
-    let indices = events.compactMap { e -> Int? in
-      if case .denoiseStepStart(let idx, _, _, _, _, _) = e { return idx } else { return nil }
-    }
-
-    #expect(indices.count == 4)
-    for i in 1..<indices.count {
-      #expect(indices[i] > indices[i - 1], "stepIndex not monotone at position \(i)")
-    }
-  }
-
-  @Test("latentAfterStat.shape matches configured latent shape")
-  func latentAfterStatShapeMatchesLatentShape() async throws {
-    MLXRandom.seed(42)
-    let rec = RecordingTelemetryReporter()
-    let pipeline = try await makePipeline(rec: rec)
-
-    // width=64, height=64 → latentHeight=8, latentWidth=8, channels=4
-    // latent shape: [1, 8, 8, 4]
-    let expectedShape = [1, 8, 8, 4]
-    let request = DiffusionGenerationRequest(
-      prompt: "shape test",
-      width: 64, height: 64,
-      steps: 4,
-      guidanceScale: 1.0,
-      seed: 2
-    )
-    _ = try await pipeline.generate(request: request, progress: { _ in })
-
-    let events = await rec.events
     let completeStats = events.compactMap { e -> TuberiaTensorStat? in
       if case .denoiseStepComplete(_, _, _, _, let latentAfterStat, _, _) = e {
         return latentAfterStat
@@ -310,6 +259,16 @@ struct TuberiaTelemetryDenoiseLoopTests {
       }
     }
 
+    // (1) 4× start, 4× complete
+    #expect(starts.count == 4, "Expected 4 denoiseStepStart events, got \(starts.count)")
+    #expect(completes.count == 4, "Expected 4 denoiseStepComplete events, got \(completes.count)")
+
+    // (2) stepIndex monotone across start events
+    for i in 1..<starts.count {
+      #expect(starts[i] > starts[i - 1], "stepIndex not monotone at position \(i): \(starts)")
+    }
+
+    // (3) latentAfterStat.shape matches the configured latent shape on every complete
     #expect(completeStats.count == 4)
     for stat in completeStats {
       #expect(

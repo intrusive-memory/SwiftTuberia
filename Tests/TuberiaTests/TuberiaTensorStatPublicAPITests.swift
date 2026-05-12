@@ -13,33 +13,6 @@ import Tuberia
 @Suite("TuberiaTensorStat public API")
 struct TuberiaTensorStatPublicAPITests {
 
-  @Test("Round-trips through JSONEncoder/JSONDecoder with every field preserved")
-  func roundTripsThroughJSON() throws {
-    let original = TuberiaTensorStat(
-      shape: [1],
-      dtype: "float32",
-      min: 0,
-      max: 0,
-      mean: 0,
-      std: 0,
-      hasNaN: false,
-      hasInf: false
-    )
-
-    let data = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(TuberiaTensorStat.self, from: data)
-
-    #expect(decoded.shape == original.shape)
-    #expect(decoded.dtype == original.dtype)
-    #expect(decoded.min == original.min)
-    #expect(decoded.max == original.max)
-    #expect(decoded.mean == original.mean)
-    #expect(decoded.std == original.std)
-    #expect(decoded.hasNaN == original.hasNaN)
-    #expect(decoded.hasInf == original.hasInf)
-    #expect(decoded == original)
-  }
-
   @Test("Round-trips a multi-dim, populated stat with NaN/Inf flags set")
   func roundTripsPopulatedStat() throws {
     let original = TuberiaTensorStat(

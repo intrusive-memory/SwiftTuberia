@@ -99,8 +99,10 @@ struct TuberiaTelemetryAnomalyTests {
     return pipeline
   }
 
-  @Test("denoiseStepComplete for step 2 carries predictionStat.hasNaN == true")
-  func denoiseStepCompleteForStep2HasNaN() async throws {
+  @Test(
+    "NaN injection at step 2 surfaces in predictionStat, fires numericalAnomaly(.nan), and the anomaly falls within the step 2 boundary"
+  )
+  func nanInjectionTelemetry() async throws {
     MLXRandom.seed(42)
     let rec = RecordingTelemetryReporter()
     let pipeline = try await makePipeline(rec: rec)
@@ -118,7 +120,7 @@ struct TuberiaTelemetryAnomalyTests {
 
     let events = await rec.events
 
-    // Find denoiseStepComplete for stepIndex == 2
+    // (1) denoiseStepComplete for stepIndex == 2 carries predictionStat.hasNaN == true
     let step2Complete = events.compactMap { e -> TuberiaTelemetryEvent? in
       if case .denoiseStepComplete(let idx, _, _, _, _, _, _) = e, idx == 2 {
         return e
@@ -128,34 +130,15 @@ struct TuberiaTelemetryAnomalyTests {
     }.first
 
     #expect(step2Complete != nil, "Expected denoiseStepComplete(stepIndex: 2) to be emitted")
-
     if case .denoiseStepComplete(_, _, _, _, _, let predictionStat, _) = step2Complete {
       #expect(
         predictionStat.hasNaN,
         "Expected predictionStat.hasNaN == true for step 2, got false"
       )
     }
-  }
 
-  @Test("numericalAnomaly(.nan) fires for step 2 within the backbone_forward_complete phase")
-  func numericalAnomalyNaNFiresForStep2() async throws {
-    MLXRandom.seed(42)
-    let rec = RecordingTelemetryReporter()
-    let pipeline = try await makePipeline(rec: rec)
-
-    let request = DiffusionGenerationRequest(
-      prompt: "nan anomaly test",
-      width: 64, height: 64,
-      steps: 4,
-      guidanceScale: 1.0,
-      seed: 1
-    )
-    _ = try? await pipeline.generate(request: request, progress: { _ in })
-
-    let events = await rec.events
-
-    // Find a numericalAnomaly event for stepIndex == 2 with kind == .nan
-    // The no-CFG backbone phase is "backbone_forward_complete_no_cfg"
+    // (2) numericalAnomaly(.nan, stepIndex: 2) fires, with a phase in the
+    //     backbone_forward_complete_* family (no-CFG variant: "_no_cfg")
     let nanAnomalies = events.compactMap {
       e -> (phase: String, kind: TuberiaTelemetryEvent.AnomalyKind, stepIndex: Int?)? in
       if case .numericalAnomaly(let phase, let kind, let stepIdx, _) = e {
@@ -169,8 +152,6 @@ struct TuberiaTelemetryAnomalyTests {
       !nanAnomalies.isEmpty,
       "Expected at least one numericalAnomaly(.nan, stepIndex: 2) event"
     )
-
-    // Confirm the phase is from the backbone_forward_complete family
     let backbonePhases = nanAnomalies.filter {
       $0.phase.hasPrefix("backbone_forward_complete")
     }
@@ -178,26 +159,9 @@ struct TuberiaTelemetryAnomalyTests {
       !backbonePhases.isEmpty,
       "Expected numericalAnomaly(.nan) to have a backbone_forward_complete phase, got: \(nanAnomalies.map { $0.phase })"
     )
-  }
 
-  @Test("numericalAnomaly fires between the step 2 start and step 3 start events")
-  func nanAnomalyFallsWithinStep2Boundary() async throws {
-    MLXRandom.seed(42)
-    let rec = RecordingTelemetryReporter()
-    let pipeline = try await makePipeline(rec: rec)
-
-    let request = DiffusionGenerationRequest(
-      prompt: "nan boundary test",
-      width: 64, height: 64,
-      steps: 4,
-      guidanceScale: 1.0,
-      seed: 2
-    )
-    _ = try? await pipeline.generate(request: request, progress: { _ in })
-
-    let events = await rec.events
-
-    // Find positions of denoiseStepStart for step 2 and step 3 (if it exists)
+    // (3) The anomaly event falls inside the step 2 boundary
+    //     (after step 2 start, before step 3 start if step 3 fires)
     var step2StartIdx: Int? = nil
     var step3StartIdx: Int? = nil
     for (i, e) in events.enumerated() {
@@ -206,13 +170,6 @@ struct TuberiaTelemetryAnomalyTests {
         if idx == 3 { step3StartIdx = i }
       }
     }
-
-    guard let start2 = step2StartIdx else {
-      // If step 2 didn't fire (fewer than 3 steps), skip this test
-      return
-    }
-
-    // Find numericalAnomaly(.nan, stepIndex: 2) position
     let nanAnomalyIdx = events.indices.first { i in
       if case .numericalAnomaly(_, let kind, let sIdx, _) = events[i] {
         return kind == .nan && sIdx == 2
@@ -220,20 +177,17 @@ struct TuberiaTelemetryAnomalyTests {
       return false
     }
 
-    guard let anomalyIdx = nanAnomalyIdx else {
-      Issue.record("numericalAnomaly(.nan, stepIndex: 2) was not emitted")
-      return
-    }
-
-    // Anomaly must come after step 2 start
-    #expect(anomalyIdx > start2, "Anomaly at \(anomalyIdx) must come after step2Start at \(start2)")
-
-    // If step 3 started, anomaly must come before it
-    if let start3 = step3StartIdx {
+    if let start2 = step2StartIdx, let anomalyIdx = nanAnomalyIdx {
       #expect(
-        anomalyIdx < start3,
-        "Anomaly at \(anomalyIdx) must come before step3Start at \(start3)"
+        anomalyIdx > start2,
+        "Anomaly at \(anomalyIdx) must come after step2Start at \(start2)"
       )
+      if let start3 = step3StartIdx {
+        #expect(
+          anomalyIdx < start3,
+          "Anomaly at \(anomalyIdx) must come before step3Start at \(start3)"
+        )
+      }
     }
   }
 }
