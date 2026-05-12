@@ -2,11 +2,20 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.6.5-dev
+**Version**: 0.7.0
 
 ---
 
 ## Recent Changes
+
+### v0.7.0 — Telemetry instrumentation (GLASS PIPES) + SwiftAcervo floor bump
+
+Minor release adding a structured telemetry surface across the diffusion pipeline plus a SwiftAcervo dependency bump.
+
+- **Telemetry events** (`TuberiaTelemetryEvent`, `TuberiaTelemetryReporter`, `TuberiaTensorStat`): emit lifecycle, assembly, memory, weight, LoRA, text-encoder, scheduler, denoise-loop, CFG-cast, anomaly, backbone/decoder/renderer events from the diffusion pipeline. Reporters are injectable via defaulted parameters; passing nothing is a no-op.
+- **Five instrumented protocol seams**: assembly, denoise loop, CFG cast, anomaly detection, LoRA loading. See `Sources/Tuberia/Pipeline/DiffusionPipeline+Telemetry.swift`.
+- **SwiftAcervo floor bump**: `0.11.1` → `0.13.0`.
+- **swift-tokenizers pin**: held at `0.5.x` (upstream `0.6.x` ships broken FFI).
 
 ### v0.6.5 — swift-tokenizers 0.5.0 floor bump (broken-resolution fix)
 
