@@ -158,62 +158,261 @@ public actor DiffusionPipeline<
 
     // Run recipe's own validation
     try recipe.validate()
+
+    // Emit pipelineConfigured. Telemetry is nil at init time (setTelemetry() is called
+    // after construction), so this is always a no-op on first run. The structure is
+    // correct: if telemetry were ever installed before construction completes in a future
+    // redesign, this would fire. We use Task{} because init is synchronous.
+    if let t = telemetry {
+      let recipeName = String(describing: type(of: recipe))
+      let encoderType = String(describing: type(of: encoder))
+      let schedulerType = String(describing: type(of: scheduler))
+      let backboneType = String(describing: type(of: backbone))
+      let decoderType = String(describing: type(of: decoder))
+      let rendererType = String(describing: type(of: renderer))
+      let encQ = "\(_encoderQuantization)"
+      let bkQ = "\(_backboneQuantization)"
+      let decQ = "\(_decoderQuantization)"
+      let peak = _memoryRequirement.peakMemoryBytes
+      let phased = _memoryRequirement.phasedMemoryBytes
+      Task {
+        await t.capture(
+          .pipelineConfigured(
+            recipeName: recipeName,
+            encoderType: encoderType,
+            schedulerType: schedulerType,
+            backboneType: backboneType,
+            decoderType: decoderType,
+            rendererType: rendererType,
+            encoderQuantization: encQ,
+            backboneQuantization: bkQ,
+            decoderQuantization: decQ,
+            peakMemoryBytes: peak,
+            phasedMemoryBytes: phased
+          ))
+      }
+    }
   }
 
   // MARK: - Assembly-Time Validation
 
   /// Performs six assembly-time shape contract checks.
+  ///
+  /// Accepts an optional telemetry reporter so Sortie 3 can wire
+  /// `assemblyCheckPassed` / `assemblyCheckFailed` / `errorThrown` events.
+  /// Called from `init`, which is synchronous and constructs the actor before
+  /// telemetry is installed — so in practice `telemetry` is always `nil` on
+  /// the first call. Emission sites use `Task { }` so the function stays
+  /// synchronous (avoiding an async init ABI break). Tests that verify assembly
+  /// events should yield before asserting (e.g. `await Task.yield()`).
   private static func validateAssembly(
     encoder: E,
     backbone: B,
     decoder: D,
-    supportsImageToImage: Bool
+    supportsImageToImage: Bool,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) throws {
-    // Check 1: Completeness -- components are non-nil by construction (no optionals)
+    // Check 1: Completeness -- components are non-nil by construction (no optionals).
+    // Emit unconditionally; the guard is a no-op when telemetry is nil.
+    if let telemetry {
+      Task {
+        await telemetry.capture(
+          .assemblyCheckPassed(
+            check: .completeness,
+            inlet: String(describing: type(of: encoder)),
+            outlet: String(describing: type(of: backbone))
+          ))
+      }
+    }
 
     // Check 2: Encoder -> Backbone (embedding dimension)
     if encoder.outputEmbeddingDim != backbone.expectedConditioningDim {
+      let inlet2 = "Backbone.expectedConditioningDim(\(backbone.expectedConditioningDim))"
+      let outlet2 = "TextEncoder.outputEmbeddingDim(\(encoder.outputEmbeddingDim))"
+      let reason2 =
+        "Embedding dimension mismatch: encoder produces \(encoder.outputEmbeddingDim) but backbone expects \(backbone.expectedConditioningDim)"
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckFailed(
+              check: .encoderToBackboneDim,
+              inlet: inlet2,
+              outlet: outlet2,
+              reason: reason2
+            ))
+          await telemetry.capture(
+            .errorThrown(
+              phase: .assembly,
+              errorDescription: reason2,
+              stepIndex: nil
+            ))
+        }
+      }
       throw PipelineError.incompatibleComponents(
-        inlet: "Backbone.expectedConditioningDim(\(backbone.expectedConditioningDim))",
-        outlet: "TextEncoder.outputEmbeddingDim(\(encoder.outputEmbeddingDim))",
-        reason:
-          "Embedding dimension mismatch: encoder produces \(encoder.outputEmbeddingDim) but backbone expects \(backbone.expectedConditioningDim)"
+        inlet: inlet2,
+        outlet: outlet2,
+        reason: reason2
       )
+    } else {
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckPassed(
+              check: .encoderToBackboneDim,
+              inlet: "Backbone.expectedConditioningDim(\(backbone.expectedConditioningDim))",
+              outlet: "TextEncoder.outputEmbeddingDim(\(encoder.outputEmbeddingDim))"
+            ))
+        }
+      }
     }
 
     // Check 3: Encoder -> Backbone (sequence length)
     if encoder.maxSequenceLength != backbone.expectedMaxSequenceLength {
+      let inlet3 = "Backbone.expectedMaxSequenceLength(\(backbone.expectedMaxSequenceLength))"
+      let outlet3 = "TextEncoder.maxSequenceLength(\(encoder.maxSequenceLength))"
+      let reason3 =
+        "Sequence length mismatch: encoder produces \(encoder.maxSequenceLength) but backbone expects \(backbone.expectedMaxSequenceLength)"
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckFailed(
+              check: .encoderToBackboneSeq,
+              inlet: inlet3,
+              outlet: outlet3,
+              reason: reason3
+            ))
+          await telemetry.capture(
+            .errorThrown(
+              phase: .assembly,
+              errorDescription: reason3,
+              stepIndex: nil
+            ))
+        }
+      }
       throw PipelineError.incompatibleComponents(
-        inlet: "Backbone.expectedMaxSequenceLength(\(backbone.expectedMaxSequenceLength))",
-        outlet: "TextEncoder.maxSequenceLength(\(encoder.maxSequenceLength))",
-        reason:
-          "Sequence length mismatch: encoder produces \(encoder.maxSequenceLength) but backbone expects \(backbone.expectedMaxSequenceLength)"
+        inlet: inlet3,
+        outlet: outlet3,
+        reason: reason3
       )
+    } else {
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckPassed(
+              check: .encoderToBackboneSeq,
+              inlet: "Backbone.expectedMaxSequenceLength(\(backbone.expectedMaxSequenceLength))",
+              outlet: "TextEncoder.maxSequenceLength(\(encoder.maxSequenceLength))"
+            ))
+        }
+      }
     }
 
     // Check 4: Backbone -> Decoder (latent channels)
     if backbone.outputLatentChannels != decoder.expectedInputChannels {
+      let inlet4 = "Decoder.expectedInputChannels(\(decoder.expectedInputChannels))"
+      let outlet4 = "Backbone.outputLatentChannels(\(backbone.outputLatentChannels))"
+      let reason4 =
+        "Latent channel mismatch: backbone produces \(backbone.outputLatentChannels) channels but decoder expects \(decoder.expectedInputChannels)"
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckFailed(
+              check: .backboneToDecoder,
+              inlet: inlet4,
+              outlet: outlet4,
+              reason: reason4
+            ))
+          await telemetry.capture(
+            .errorThrown(
+              phase: .assembly,
+              errorDescription: reason4,
+              stepIndex: nil
+            ))
+        }
+      }
       throw PipelineError.incompatibleComponents(
-        inlet: "Decoder.expectedInputChannels(\(decoder.expectedInputChannels))",
-        outlet: "Backbone.outputLatentChannels(\(backbone.outputLatentChannels))",
-        reason:
-          "Latent channel mismatch: backbone produces \(backbone.outputLatentChannels) channels but decoder expects \(decoder.expectedInputChannels)"
+        inlet: inlet4,
+        outlet: outlet4,
+        reason: reason4
       )
+    } else {
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckPassed(
+              check: .backboneToDecoder,
+              inlet: "Decoder.expectedInputChannels(\(decoder.expectedInputChannels))",
+              outlet: "Backbone.outputLatentChannels(\(backbone.outputLatentChannels))"
+            ))
+        }
+      }
     }
 
-    // Check 5: Decoder -> Renderer modality compatibility
-    // This is validated implicitly by the type system in most cases.
-    // The recipe's type constraints ensure compatibility.
+    // Check 5: Decoder -> Renderer modality compatibility.
+    // Validated implicitly by the type system; the recipe's type constraints
+    // ensure compatibility — no runtime check needed today.
+    if let telemetry {
+      Task {
+        await telemetry.capture(
+          .assemblyCheckPassed(
+            check: .decoderToRenderer,
+            inlet: String(describing: type(of: decoder)),
+            outlet: String(describing: type(of: decoder))
+          ))
+      }
+    }
 
     // Check 6: Image-to-image requires BidirectionalDecoder
     if supportsImageToImage {
       guard decoder is any BidirectionalDecoder else {
+        let inlet6 = "DiffusionPipeline"
+        let outlet6 = "Decoder"
+        let reason6 =
+          "Recipe declares supportsImageToImage but decoder does not conform to BidirectionalDecoder"
+        if let telemetry {
+          Task {
+            await telemetry.capture(
+              .assemblyCheckFailed(
+                check: .imageToImageBidirectional,
+                inlet: inlet6,
+                outlet: outlet6,
+                reason: reason6
+              ))
+            await telemetry.capture(
+              .errorThrown(
+                phase: .assembly,
+                errorDescription: reason6,
+                stepIndex: nil
+              ))
+          }
+        }
         throw PipelineError.incompatibleComponents(
-          inlet: "DiffusionPipeline",
-          outlet: "Decoder",
-          reason:
-            "Recipe declares supportsImageToImage but decoder does not conform to BidirectionalDecoder"
+          inlet: inlet6,
+          outlet: outlet6,
+          reason: reason6
         )
+      }
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckPassed(
+              check: .imageToImageBidirectional,
+              inlet: "DiffusionPipeline",
+              outlet: "Decoder"
+            ))
+        }
+      }
+    } else {
+      // Not an img2img recipe — check passes vacuously.
+      if let telemetry {
+        Task {
+          await telemetry.capture(
+            .assemblyCheckPassed(
+              check: .imageToImageBidirectional,
+              inlet: "DiffusionPipeline",
+              outlet: "Decoder"
+            ))
+        }
       }
     }
   }
@@ -276,11 +475,34 @@ public actor DiffusionPipeline<
       // gates installed via `setMemoryGate(_:)` discard the reporter (test
       // stubs do not emit telemetry).
       try await memoryGate(peak, telemetry)
+      if let telemetry {
+        await telemetry.capture(.memoryGateChecked(requiredBytes: peak, passed: true))
+      }
     } catch let error as PipelineError {
       // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
+      if let telemetry {
+        await telemetry.capture(
+          .memoryGateChecked(requiredBytes: peak, passed: false))
+        await telemetry.capture(
+          .errorThrown(
+            phase: .memoryGate,
+            errorDescription: String(describing: error),
+            stepIndex: nil
+          ))
+      }
       throw error
     } catch {
       // Unexpected error from a custom gate: wrap in insufficientMemory with 0 available.
+      if let telemetry {
+        await telemetry.capture(
+          .memoryGateChecked(requiredBytes: peak, passed: false))
+        await telemetry.capture(
+          .errorThrown(
+            phase: .memoryGate,
+            errorDescription: String(describing: error),
+            stepIndex: nil
+          ))
+      }
       throw PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
     }
 
@@ -309,6 +531,12 @@ public actor DiffusionPipeline<
       progress(loadedCount / totalSegments, componentName)
 
       if let componentId = componentId {
+        // Emit componentReadinessChecked before we check / download the component.
+        if let telemetry {
+          await telemetry.capture(
+            .componentReadinessChecked(componentID: componentId, ready: segment.isLoaded))
+        }
+
         // Ensure the component files are present on disk (downloads if missing).
         //
         // We fold download progress into the existing (Double, String) tick stream rather
@@ -329,12 +557,45 @@ public actor DiffusionPipeline<
           progress(fraction, capturedName)
         }
 
+        // Emit weightLoadStart before loading weights.
+        if let telemetry {
+          await telemetry.capture(
+            .weightLoadStart(role: componentName, componentID: componentId))
+        }
+        let weightLoadStart = Date()
+
         let weights = try await WeightLoader.load(
           componentId: componentId,
           keyMapping: segment.keyMapping,
           tensorTransform: segment.tensorTransform,
-          quantization: quantization
+          quantization: quantization,
+          telemetry: telemetry
         )
+
+        // Emit weightLoadComplete after weights are loaded.
+        if let telemetry {
+          let paramCount = weights.parameters.count
+          let totalBytes = weights.parameters.values.reduce(UInt64(0)) { acc, arr in
+            let elementBytes: UInt64
+            switch arr.dtype {
+            case .float16, .bfloat16, .uint16, .int16: elementBytes = 2
+            case .float32, .int32, .uint32: elementBytes = 4
+            case .int8, .uint8, .bool: elementBytes = 1
+            case .float64, .int64, .uint64: elementBytes = 8
+            default: elementBytes = 4
+            }
+            return acc + UInt64(arr.size) * elementBytes
+          }
+          let duration = Date().timeIntervalSince(weightLoadStart)
+          await telemetry.capture(
+            .weightLoadComplete(
+              role: componentName,
+              componentID: componentId,
+              paramCount: paramCount,
+              totalBytes: totalBytes,
+              durationSeconds: duration
+            ))
+        }
 
         try segment.apply(weights: weights)
 
@@ -378,12 +639,36 @@ public actor DiffusionPipeline<
     progress: @Sendable (PipelineProgress) -> Void
   ) async throws -> Result {
     guard encoder.isLoaded else {
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .missingComponent,
+            errorDescription: "encoder not loaded",
+            stepIndex: nil
+          ))
+      }
       throw PipelineError.missingComponent(role: "encoder")
     }
     guard backbone.isLoaded else {
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .missingComponent,
+            errorDescription: "backbone not loaded",
+            stepIndex: nil
+          ))
+      }
       throw PipelineError.missingComponent(role: "backbone")
     }
     guard decoder.isLoaded else {
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .missingComponent,
+            errorDescription: "decoder not loaded",
+            stepIndex: nil
+          ))
+      }
       throw PipelineError.missingComponent(role: "decoder")
     }
 
@@ -392,253 +677,337 @@ public actor DiffusionPipeline<
     // Determine the actual seed
     let actualSeed = request.seed ?? UInt32.random(in: 0...UInt32.max)
 
-    // LoRA: load adapter weights and merge into backbone before generation.
-    // Single active LoRA constraint: only one LoRA config per generation call.
-    // After the denoising loop, the base weights are restored via LoRALoader.unapply.
-    let loraAdapterWeights: ModuleParameters?
-    if let loraConfig = request.loRA {
-      loraAdapterWeights = try await LoRALoader.loadAdapterWeights(
-        config: loraConfig,
-        keyMapping: backbone.keyMapping
-      )
-      // Merge LoRA adapter weights into the backbone's base weights.
-      if let adapterWeights = loraAdapterWeights,
-        let baseWeights = backbone.currentWeights
-      {
-        let mergedWeights = LoRALoader.apply(
-          adapterWeights: adapterWeights,
-          to: baseWeights,
-          scale: loraConfig.scale
-        )
-        try backbone.apply(weights: mergedWeights)
-      }
-    } else {
-      loraAdapterWeights = nil
+    // Generate a run ID for telemetry correlation and emit pipelineStart.
+    // pipelineEnd is emitted via do/catch below — success=true on the success
+    // path, success=false in the catch (which re-throws to the caller).
+    let runID = UUID()
+    if let telemetry {
+      await telemetry.capture(
+        .pipelineStart(
+          runID: runID,
+          prompt: request.prompt,
+          steps: request.steps,
+          guidanceScale: Double(request.guidanceScale),
+          seed: actualSeed,
+          width: request.width,
+          height: request.height
+        ))
     }
 
-    // Prepare the prompt (with optional LoRA activation keyword)
-    var effectivePrompt = request.prompt
-    if let loraConfig = request.loRA, let keyword = loraConfig.activationKeyword {
-      effectivePrompt = keyword + " " + effectivePrompt
-    }
-
-    // --- Step 1: Encode prompt ---
-    progress(.encoding(fraction: 0.0))
-    let encoderInput = TextEncoderInput(
-      text: effectivePrompt,
-      maxLength: encoder.maxSequenceLength
-    )
-
-    let conditionalOutput: TextEncoderOutput
+    // Wrap the entire generation body in a do/catch so pipelineEnd(success:)
+    // fires on both the success and error paths without using async-unsafe defer.
     do {
-      conditionalOutput = try encoder.encode(encoderInput)
-    } catch {
-      throw PipelineError.encodingFailed(reason: String(describing: error))
-    }
-    progress(.encoding(fraction: 0.5))
+      // LoRA: load adapter weights and merge into backbone before generation.
+      // Single active LoRA constraint: only one LoRA config per generation call.
+      // After the denoising loop, the base weights are restored via LoRALoader.unapply.
+      let loraAdapterWeights: ModuleParameters?
+      if let loraConfig = request.loRA {
+        if let telemetry {
+          await telemetry.capture(
+            .loraLoadStart(
+              componentID: loraConfig.componentId,
+              localPath: loraConfig.localPath,
+              scale: Double(loraConfig.scale),
+              activationKeyword: loraConfig.activationKeyword
+            ))
+        }
+        let loraLoadStartTime = Date()
 
-    // Compute unconditional embeddings for CFG
-    let unconditionalOutput: TextEncoderOutput?
-    let useCFG = request.guidanceScale > 1.0
-
-    if useCFG {
-      switch _unconditionalEmbeddingStrategy {
-      case .emptyPrompt:
-        let uncondInput = TextEncoderInput(
-          text: request.negativePrompt ?? "",
-          maxLength: encoder.maxSequenceLength
+        let loaded = try await LoRALoader.loadAdapterWeights(
+          config: loraConfig,
+          keyMapping: backbone.keyMapping,
+          telemetry: telemetry
         )
-        do {
-          unconditionalOutput = try encoder.encode(uncondInput)
-        } catch {
-          throw PipelineError.encodingFailed(reason: "Unconditional encoding failed: \(error)")
+        loraAdapterWeights = loaded
+
+        if let telemetry {
+          let adapterParamCount = loaded.parameters.count
+          await telemetry.capture(
+            .loraLoadComplete(
+              adapterParamCount: adapterParamCount,
+              durationSeconds: Date().timeIntervalSince(loraLoadStartTime)
+            ))
         }
 
-      case .zeroVector(let shape):
-        let zeros = MLXArray.zeros(shape)
-        let maskShape = [shape[0], shape[1]]
-        let zeroMask = MLXArray.zeros(maskShape)
-        unconditionalOutput = TextEncoderOutput(
-          embeddings: zeros,
-          mask: zeroMask
-        )
+        // Merge LoRA adapter weights into the backbone's base weights.
+        if let adapterWeights = loraAdapterWeights,
+          let baseWeights = backbone.currentWeights
+        {
+          let mergedWeights = LoRALoader.apply(
+            adapterWeights: adapterWeights,
+            to: baseWeights,
+            scale: loraConfig.scale,
+            telemetry: telemetry
+          )
+          try backbone.apply(weights: mergedWeights)
 
-      case .none:
-        // No CFG -- guidance scale is embedded into the model
+          if let telemetry {
+            // Count the number of layers that were actually merged.
+            let targetLayerCount = mergedWeights.parameters.count
+            await telemetry.capture(.loraApplied(targetLayerCount: targetLayerCount))
+          }
+        }
+      } else {
+        loraAdapterWeights = nil
+      }
+
+      // Prepare the prompt (with optional LoRA activation keyword)
+      var effectivePrompt = request.prompt
+      if let loraConfig = request.loRA, let keyword = loraConfig.activationKeyword {
+        effectivePrompt = keyword + " " + effectivePrompt
+      }
+
+      // --- Step 1: Encode prompt ---
+      progress(.encoding(fraction: 0.0))
+      let encoderInput = TextEncoderInput(
+        text: effectivePrompt,
+        maxLength: encoder.maxSequenceLength
+      )
+
+      let conditionalOutput: TextEncoderOutput
+      do {
+        conditionalOutput = try encoder.encode(encoderInput)
+      } catch {
+        throw PipelineError.encodingFailed(reason: String(describing: error))
+      }
+      progress(.encoding(fraction: 0.5))
+
+      // Compute unconditional embeddings for CFG
+      let unconditionalOutput: TextEncoderOutput?
+      let useCFG = request.guidanceScale > 1.0
+
+      if useCFG {
+        switch _unconditionalEmbeddingStrategy {
+        case .emptyPrompt:
+          let uncondInput = TextEncoderInput(
+            text: request.negativePrompt ?? "",
+            maxLength: encoder.maxSequenceLength
+          )
+          do {
+            unconditionalOutput = try encoder.encode(uncondInput)
+          } catch {
+            throw PipelineError.encodingFailed(reason: "Unconditional encoding failed: \(error)")
+          }
+
+        case .zeroVector(let shape):
+          let zeros = MLXArray.zeros(shape)
+          let maskShape = [shape[0], shape[1]]
+          let zeroMask = MLXArray.zeros(maskShape)
+          unconditionalOutput = TextEncoderOutput(
+            embeddings: zeros,
+            mask: zeroMask
+          )
+
+        case .none:
+          // No CFG -- guidance scale is embedded into the model
+          unconditionalOutput = nil
+        }
+      } else {
         unconditionalOutput = nil
       }
-    } else {
-      unconditionalOutput = nil
-    }
-    progress(.encoding(fraction: 1.0))
+      progress(.encoding(fraction: 1.0))
 
-    // --- Step 2: Prepare initial latents ---
-    let latentHeight = request.height / 8
-    let latentWidth = request.width / 8
-    let latentChannels = backbone.outputLatentChannels
-    let latentShape = [1, latentHeight, latentWidth, latentChannels]
+      // --- Step 2: Prepare initial latents ---
+      let latentHeight = request.height / 8
+      let latentWidth = request.width / 8
+      let latentChannels = backbone.outputLatentChannels
+      let latentShape = [1, latentHeight, latentWidth, latentChannels]
 
-    // Seed the random generator
-    MLXRandom.seed(UInt64(actualSeed))
-    var latents: MLXArray
+      // Seed the random generator
+      MLXRandom.seed(UInt64(actualSeed))
+      var latents: MLXArray
 
-    // Compute img2img start timestep
-    var startTimestep: Int? = nil
+      // Compute img2img start timestep
+      var startTimestep: Int? = nil
 
-    if let referenceImages = request.referenceImages, !referenceImages.isEmpty,
-      let strength = request.strength
-    {
-      // Image-to-image: encode reference, add noise
-      guard let bidirectionalDecoder = decoder as? any BidirectionalDecoder else {
-        throw PipelineError.generationFailed(
-          step: 0,
-          reason: "Image-to-image requires a BidirectionalDecoder"
-        )
-      }
-
-      // Convert CGImage to MLXArray with shape [1, H, W, 3] in [0, 1] range
-      let referencePixels = cgImageToMLXArray(
-        referenceImages[0],
-        height: request.height,
-        width: request.width
-      )
-
-      do {
-        let imageLatents = try bidirectionalDecoder.encode(referencePixels)
-        let noise = MLXRandom.normal(latentShape)
-        startTimestep = Int(Float(request.steps) * (1.0 - strength))
-        let plan = scheduler.configure(steps: request.steps, startTimestep: startTimestep)
-        if let firstTimestep = plan.timesteps.first {
-          latents = scheduler.addNoise(to: imageLatents, noise: noise, at: firstTimestep)
-        } else {
-          latents = imageLatents
-        }
-      } catch {
-        throw PipelineError.generationFailed(
-          step: 0,
-          reason: "Failed to encode reference image: \(error)"
-        )
-      }
-    } else {
-      // Text-to-image: pure noise
-      latents = MLXRandom.normal(latentShape)
-    }
-
-    // --- Step 3: Configure scheduler ---
-    scheduler.reset()
-    let plan = scheduler.configure(steps: request.steps, startTimestep: startTimestep)
-    let timesteps = plan.timesteps
-
-    // --- Step 4: Denoising loop ---
-    let totalSteps = timesteps.count
-    for (stepIndex, timestep) in timesteps.enumerated() {
-      let elapsed = Date().timeIntervalSince(startTime)
-      progress(.generating(step: stepIndex + 1, totalSteps: totalSteps, elapsed: elapsed))
-
-      let timestepArray = MLXArray(Int32(timestep))
-
-      do {
-        if useCFG, let uncondEmb = unconditionalOutput {
-          // Classifier-free guidance: run backbone twice (unconditional and conditional)
-          let uncondInput = BackboneInput(
-            latents: latents,
-            conditioning: uncondEmb.embeddings,
-            conditioningMask: uncondEmb.mask,
-            timestep: timestepArray
-          )
-          let condInput = BackboneInput(
-            latents: latents,
-            conditioning: conditionalOutput.embeddings,
-            conditioningMask: conditionalOutput.mask,
-            timestep: timestepArray
-          )
-
-          let uncondPrediction = try backbone.forward(uncondInput)
-          let condPrediction = try backbone.forward(condInput)
-
-          // CFG formula: uncond + scale * (cond - uncond)
-          // Cast to float32 before scheduler math: backbone weights are float16, and at
-          // high-noise timesteps (t≈999, sigma≈157) the DPM-Solver divides by sqrt(alpha_t)≈0.006,
-          // amplifying float16 rounding errors 157×. Float32 prevents channel-specific bias
-          // accumulation over the 20-step trajectory.
-          let guidedPrediction =
-            (uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction)).asType(
-              .float32)
-
-          latents = try scheduler.step(
-            output: guidedPrediction,
-            timestep: timestep,
-            sample: latents
-          )
-        } else {
-          // No CFG: single backbone pass
-          let input = BackboneInput(
-            latents: latents,
-            conditioning: conditionalOutput.embeddings,
-            conditioningMask: conditionalOutput.mask,
-            timestep: timestepArray
-          )
-
-          // Cast to float32: see CFG branch comment above.
-          let prediction = try backbone.forward(input).asType(.float32)
-
-          latents = try scheduler.step(
-            output: prediction,
-            timestep: timestep,
-            sample: latents
+      if let referenceImages = request.referenceImages, !referenceImages.isEmpty,
+        let strength = request.strength
+      {
+        // Image-to-image: encode reference, add noise
+        guard let bidirectionalDecoder = decoder as? any BidirectionalDecoder else {
+          throw PipelineError.generationFailed(
+            step: 0,
+            reason: "Image-to-image requires a BidirectionalDecoder"
           )
         }
+
+        // Convert CGImage to MLXArray with shape [1, H, W, 3] in [0, 1] range
+        let referencePixels = cgImageToMLXArray(
+          referenceImages[0],
+          height: request.height,
+          width: request.width
+        )
+
+        do {
+          let imageLatents = try bidirectionalDecoder.encode(referencePixels)
+          let noise = MLXRandom.normal(latentShape)
+          startTimestep = Int(Float(request.steps) * (1.0 - strength))
+          let plan = scheduler.configure(steps: request.steps, startTimestep: startTimestep)
+          if let firstTimestep = plan.timesteps.first {
+            latents = scheduler.addNoise(to: imageLatents, noise: noise, at: firstTimestep)
+          } else {
+            latents = imageLatents
+          }
+        } catch {
+          throw PipelineError.generationFailed(
+            step: 0,
+            reason: "Failed to encode reference image: \(error)"
+          )
+        }
+      } else {
+        // Text-to-image: pure noise
+        latents = MLXRandom.normal(latentShape)
+      }
+
+      // --- Step 3: Configure scheduler ---
+      scheduler.reset()
+      let plan = scheduler.configure(steps: request.steps, startTimestep: startTimestep)
+      let timesteps = plan.timesteps
+
+      // --- Step 4: Denoising loop ---
+      let totalSteps = timesteps.count
+      for (stepIndex, timestep) in timesteps.enumerated() {
+        let elapsed = Date().timeIntervalSince(startTime)
+        progress(.generating(step: stepIndex + 1, totalSteps: totalSteps, elapsed: elapsed))
+
+        let timestepArray = MLXArray(Int32(timestep))
+
+        do {
+          if useCFG, let uncondEmb = unconditionalOutput {
+            // Classifier-free guidance: run backbone twice (unconditional and conditional)
+            let uncondInput = BackboneInput(
+              latents: latents,
+              conditioning: uncondEmb.embeddings,
+              conditioningMask: uncondEmb.mask,
+              timestep: timestepArray
+            )
+            let condInput = BackboneInput(
+              latents: latents,
+              conditioning: conditionalOutput.embeddings,
+              conditioningMask: conditionalOutput.mask,
+              timestep: timestepArray
+            )
+
+            let uncondPrediction = try backbone.forward(uncondInput)
+            let condPrediction = try backbone.forward(condInput)
+
+            // CFG formula: uncond + scale * (cond - uncond)
+            // Cast to float32 before scheduler math: backbone weights are float16, and at
+            // high-noise timesteps (t≈999, sigma≈157) the DPM-Solver divides by sqrt(alpha_t)≈0.006,
+            // amplifying float16 rounding errors 157×. Float32 prevents channel-specific bias
+            // accumulation over the 20-step trajectory.
+            let guidedPrediction =
+              (uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction))
+              .asType(
+                .float32)
+
+            latents = try scheduler.step(
+              output: guidedPrediction,
+              timestep: timestep,
+              sample: latents
+            )
+          } else {
+            // No CFG: single backbone pass
+            let input = BackboneInput(
+              latents: latents,
+              conditioning: conditionalOutput.embeddings,
+              conditioningMask: conditionalOutput.mask,
+              timestep: timestepArray
+            )
+
+            // Cast to float32: see CFG branch comment above.
+            let prediction = try backbone.forward(input).asType(.float32)
+
+            latents = try scheduler.step(
+              output: prediction,
+              timestep: timestep,
+              sample: latents
+            )
+          }
+        } catch {
+          throw PipelineError.generationFailed(
+            step: stepIndex + 1,
+            reason: String(describing: error)
+          )
+        }
+
+        // Evaluate to ensure computation runs
+        eval(latents)
+      }
+
+      // --- Step 5: Decode latents ---
+      progress(.decoding)
+      let decodedOutput: DecodedOutput
+      do {
+        decodedOutput = try decoder.decode(latents)
       } catch {
-        throw PipelineError.generationFailed(
-          step: stepIndex + 1,
-          reason: String(describing: error)
+        throw PipelineError.decodingFailed(reason: String(describing: error))
+      }
+
+      // --- Step 6: Render output ---
+      progress(.rendering)
+      let renderedOutput: RenderedOutput
+      do {
+        renderedOutput = try renderer.render(decodedOutput)
+      } catch {
+        throw PipelineError.renderingFailed(reason: String(describing: error))
+      }
+
+      // LoRA: restore base weights after generation by subtracting the adapter delta.
+      if let adapterWeights = loraAdapterWeights, let loraConfig = request.loRA,
+        let currentWeights = backbone.currentWeights
+      {
+        let restoredWeights = LoRALoader.unapply(
+          adapterWeights: adapterWeights,
+          from: currentWeights,
+          scale: loraConfig.scale
+        )
+        try backbone.apply(weights: restoredWeights)
+
+        if let telemetry {
+          let restoredLayerCount = restoredWeights.parameters.count
+          await telemetry.capture(.loraUnapplied(restoredLayerCount: restoredLayerCount))
+        }
+      }
+
+      let duration = Date().timeIntervalSince(startTime)
+      progress(.complete(duration: duration))
+
+      if let telemetry {
+        await telemetry.capture(
+          .pipelineEnd(
+            runID: runID, totalSteps: totalSteps, durationSeconds: duration, success: true)
         )
       }
 
-      // Evaluate to ensure computation runs
-      eval(latents)
-    }
-
-    // --- Step 5: Decode latents ---
-    progress(.decoding)
-    let decodedOutput: DecodedOutput
-    do {
-      decodedOutput = try decoder.decode(latents)
-    } catch {
-      throw PipelineError.decodingFailed(reason: String(describing: error))
-    }
-
-    // --- Step 6: Render output ---
-    progress(.rendering)
-    let renderedOutput: RenderedOutput
-    do {
-      renderedOutput = try renderer.render(decodedOutput)
-    } catch {
-      throw PipelineError.renderingFailed(reason: String(describing: error))
-    }
-
-    // LoRA: restore base weights after generation by subtracting the adapter delta.
-    if let adapterWeights = loraAdapterWeights, let loraConfig = request.loRA,
-      let currentWeights = backbone.currentWeights
-    {
-      let restoredWeights = LoRALoader.unapply(
-        adapterWeights: adapterWeights,
-        from: currentWeights,
-        scale: loraConfig.scale
+      return DiffusionGenerationResult(
+        output: renderedOutput,
+        seed: actualSeed,
+        steps: totalSteps,
+        guidanceScale: request.guidanceScale,
+        duration: duration
       )
-      try backbone.apply(weights: restoredWeights)
+    } catch {
+      // Error path: emit pipelineEnd(success: false) before re-throwing.
+      // totalSteps may be 0 if the error occurred before the denoising loop.
+      if let telemetry {
+        let elapsed = Date().timeIntervalSince(startTime)
+        await telemetry.capture(
+          .pipelineEnd(
+            runID: runID,
+            totalSteps: 0,
+            durationSeconds: elapsed,
+            success: false
+          ))
+        await telemetry.capture(
+          .errorThrown(
+            phase: .other,
+            errorDescription: String(describing: error),
+            stepIndex: nil
+          ))
+      }
+      throw error
     }
-
-    let duration = Date().timeIntervalSince(startTime)
-    progress(.complete(duration: duration))
-
-    return DiffusionGenerationResult(
-      output: renderedOutput,
-      seed: actualSeed,
-      steps: totalSteps,
-      guidanceScale: request.guidanceScale,
-      duration: duration
-    )
   }
 
   // MARK: - Private Helpers

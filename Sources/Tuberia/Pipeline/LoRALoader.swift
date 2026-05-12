@@ -33,14 +33,11 @@ public struct LoRALoader: Sendable {
     keyMapping: KeyMapping,
     telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
-    // Plumbing only — no emission yet (Sortie 2). Sortie 3 wires `loraLoadStart`
-    // / `loraLoadComplete` / `errorThrown` against this parameter. Reference the
-    // parameter to keep the compiler quiet about an unused defaulted argument.
-    _ = telemetry
     if let componentId = config.componentId {
       return try await WeightLoader.load(
         componentId: componentId,
-        keyMapping: keyMapping
+        keyMapping: keyMapping,
+        telemetry: telemetry
       )
     } else if let localPath = config.localPath {
       return try await WeightLoader.loadFromPath(
@@ -49,9 +46,14 @@ public struct LoRALoader: Sendable {
       )
     } else {
       // Should not happen due to precondition in LoRAConfig.init
+      let reason = "LoRAConfig has neither componentId nor localPath"
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(phase: .loraLoad, errorDescription: reason, stepIndex: nil))
+      }
       throw PipelineError.weightLoadingFailed(
         component: "unknown",
-        reason: "LoRAConfig has neither componentId nor localPath"
+        reason: reason
       )
     }
   }
@@ -77,8 +79,9 @@ public struct LoRALoader: Sendable {
     scale: Float,
     telemetry: (any TuberiaTelemetryReporter)? = nil
   ) -> ModuleParameters {
-    // Plumbing only — no emission yet (Sortie 2). Sortie 3 wires `loraApplied`
-    // against this parameter.
+    // telemetry is accepted here for API symmetry with the DiffusionPipeline call site,
+    // which emits loraApplied after calling this method. No emission occurs inside apply()
+    // itself since the merge is synchronous and emission happens at the call site.
     _ = telemetry
     var merged = baseParameters.parameters
 

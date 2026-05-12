@@ -41,8 +41,6 @@ public struct WeightLoader: Sendable {
     quantization: QuantizationConfig = .asStored,
     telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
-    // Plumbing only — no emission yet (Sortie 2).
-    _ = telemetry
     do {
       let result = try await AcervoManager.shared.withComponentAccess(componentId) {
         handle -> ModuleParameters in
@@ -54,7 +52,9 @@ public struct WeightLoader: Sendable {
         do {
           effectiveURLs = try handle.urls(matching: ".safetensors")
         } catch {
-          // No safetensors files found in descriptor
+          // No safetensors files found in descriptor.
+          // errorThrown is emitted in the outer catch since the closure is synchronous
+          // and cannot await telemetry.capture(_:).
           throw PipelineError.weightLoadingFailed(
             component: componentId,
             reason: "Component descriptor has no .safetensors files: \(error)"
@@ -64,6 +64,7 @@ public struct WeightLoader: Sendable {
         print("[WeightLoader] effective safetensors count: \(effectiveURLs.count)")
 
         guard !effectiveURLs.isEmpty else {
+          // errorThrown emitted in outer catch (closure is synchronous, cannot await).
           throw PipelineError.weightLoadingFailed(
             component: componentId,
             reason: "No .safetensors files found in component directory"
@@ -100,24 +101,73 @@ public struct WeightLoader: Sendable {
       return result
 
     } catch let error as PipelineError {
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: String(describing: error),
+            stepIndex: nil
+          ))
+      }
       throw error
     } catch AcervoError.componentNotDownloaded(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not downloaded: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.componentNotRegistered(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not registered: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.componentNotHydrated(let id) {
-      throw PipelineError.modelNotDownloaded(component: id)
+      let mappedError = PipelineError.modelNotDownloaded(component: id)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: "Component not hydrated: \(id)",
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch AcervoError.integrityCheckFailed(let file, let expected, let actual) {
-      throw PipelineError.weightLoadingFailed(
-        component: componentId,
-        reason:
-          "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
-      )
+      let reason =
+        "Integrity check failed for '\(file)': expected SHA-256 '\(expected)', got '\(actual)'"
+      let mappedError = PipelineError.weightLoadingFailed(component: componentId, reason: reason)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: reason,
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     } catch {
-      throw PipelineError.weightLoadingFailed(
-        component: componentId,
-        reason: String(describing: error)
-      )
+      let reason = String(describing: error)
+      let mappedError = PipelineError.weightLoadingFailed(component: componentId, reason: reason)
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(
+            phase: .weightLoad,
+            errorDescription: reason,
+            stepIndex: nil
+          ))
+      }
+      throw mappedError
     }
   }
 
