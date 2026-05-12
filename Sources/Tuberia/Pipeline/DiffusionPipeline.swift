@@ -114,7 +114,10 @@ public actor DiffusionPipeline<
 
   /// Construct a pipeline from a recipe. Calls `recipe.validate()` during construction.
   /// Throws `PipelineError.incompatibleComponents` if validation fails.
-  public init<Recipe: PipelineRecipe>(recipe: Recipe) throws
+  public init<Recipe: PipelineRecipe>(
+    recipe: Recipe,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
+  ) throws
   where
     Recipe.Encoder == E, Recipe.Sched == S,
     Recipe.Back == B, Recipe.Dec == D, Recipe.Rend == R
@@ -148,21 +151,25 @@ public actor DiffusionPipeline<
       phasedMemoryBytes: phasedMemory
     )
 
+    // Install telemetry reporter early so init-time events are observable.
+    // (setTelemetry() is still supported for late-binding callers.)
+    self.telemetry = telemetry
+
     // Validate shape contracts at assembly time
     try Self.validateAssembly(
       encoder: encoder,
       backbone: backbone,
       decoder: decoder,
-      supportsImageToImage: recipe.supportsImageToImage
+      supportsImageToImage: recipe.supportsImageToImage,
+      telemetry: telemetry
     )
 
     // Run recipe's own validation
     try recipe.validate()
 
-    // Emit pipelineConfigured. Telemetry is nil at init time (setTelemetry() is called
-    // after construction), so this is always a no-op on first run. The structure is
-    // correct: if telemetry were ever installed before construction completes in a future
-    // redesign, this would fire. We use Task{} because init is synchronous.
+    // Emit pipelineConfigured. If a telemetry reporter was passed to init,
+    // the event fires; otherwise this is a no-op (and setTelemetry() can be
+    // used to bind a reporter for events emitted by generate()/loadModels()).
     if let t = telemetry {
       let recipeName = String(describing: type(of: recipe))
       let encoderType = String(describing: type(of: encoder))
@@ -198,13 +205,12 @@ public actor DiffusionPipeline<
 
   /// Performs six assembly-time shape contract checks.
   ///
-  /// Accepts an optional telemetry reporter so Sortie 3 can wire
-  /// `assemblyCheckPassed` / `assemblyCheckFailed` / `errorThrown` events.
-  /// Called from `init`, which is synchronous and constructs the actor before
-  /// telemetry is installed — so in practice `telemetry` is always `nil` on
-  /// the first call. Emission sites use `Task { }` so the function stays
-  /// synchronous (avoiding an async init ABI break). Tests that verify assembly
-  /// events should yield before asserting (e.g. `await Task.yield()`).
+  /// Accepts an optional telemetry reporter so init can wire
+  /// `assemblyCheckPassed` / `assemblyCheckFailed` / `errorThrown` events
+  /// from inside the (synchronous) `init`. Emission uses `Task { }` so the
+  /// function stays synchronous (avoiding an async-init ABI break).
+  /// Tests that want to assert assembly events must `await Task.yield()`
+  /// after init to let the scheduled tasks run.
   private static func validateAssembly(
     encoder: E,
     backbone: B,
