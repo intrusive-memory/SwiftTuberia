@@ -36,15 +36,14 @@
 
 ### swift-tuberia-instrumentation
 
-- Work unit state: RUNNING
-- Current sortie: 7 of 7 — the +1% overhead bar + PR open
-- Sortie state: DISPATCHED
-- Sortie type: code
-- Model: sonnet
-- Complexity score: 8 (turns 5 + risk 3). Structured work + high-stakes measurement. Sonnet chosen because the work IS structured; the risk is in the agent reporting honestly when the measurement comes in.
+- Work unit state: RUNNING — awaiting PR open
+- Current sortie: 7 of 7 (overhead test REMOVED as unmeasurable; PR open is the remaining task)
+- Sortie state: PARTIAL → resolving into supervisor-direct PR open
+- Sortie type: code + PR composition
+- Model: n/a (supervisor handles PR open directly; the test work itself is complete via the removal)
 - Attempt: 1 of 3
-- Last verified: Sortie 6 commit e852d18 — make build/test/lint green. 47 tests in TuberiaTests target (+15 from Sortie 6). RecordingTelemetryReporter actor + 5 test files. Two spec drifts surfaced (assembly ordering, backbone phase strings) — both resolved via REQUIREMENTS-instrumentation.md edits (not production changes).
-- Notes: Reuses Sortie 6's Mock fixtures. Must NOT cut release tag — that's post-merge supervisor work using "our next minor release version" terminology (no concrete version numbers).
+- Last verified: Sortie 7 commit 33bef96 added overhead test that failed honestly at +1381%. User decision: remove the test entirely — it didn't measure what it claimed (it measured Noop emission cost, not telemetry-off cost). Test deleted; REQUIREMENTS §7 and §10 updated to reflect the structural-proof approach for the zero-cost-when-nil invariant.
+- Notes: The `if let telemetry` guard discipline IS the zero-cost invariant; structurally verified by Sortie 5 + Sortie 6 audits. No wall-clock perf test gates this.
 
 ## Post-merge cleanup queue (not blocking the mission)
 
@@ -63,12 +62,13 @@
 | 4 | COMPLETED | 1/3 | sonnet | 43d88e2 | 7 emission sites (4 textEncoder pairs + 1 schedulerConfigured) + 4 sample() calls (all inside guards, lines 797/798/845/846). Scheduler protocol grew `predictionType: String` default — non-DPM schedulers inherit "unknown" (flagged as downstream cleanup, not a blocker). Build/test/lint green (independently re-run). |
 | 5 | COMPLETED | 1/3 | opus | 195f83c | THE HOT-PATH SORTIE. 17 new emission sites + 5 errorThrown + 17 anomaly-helper invocations. 21 sample() calls total (4 from S4 + 17 from S5), every one inside an `if let telemetry` guard (discipline table verified by both agent and supervisor). All §5 rows 14-22 wired. Build/test/lint green. Two minor surfacings (DType helper duplication; internal vs private on helper) — both post-merge cleanups, not blockers. |
 | 6 | COMPLETED | 1/3 | sonnet | e852d18 | 5 test files + RecordingTelemetryReporter actor. 47 tests passing (+15 new). Surfaced two real spec drifts (assembly ordering; backbone phase strings) without silently patching production — both resolved by user-confirmed REQUIREMENTS edits rather than production changes. No production-code bugs found. |
+| 7 | COMPLETED (test removed) | 1/3 | sonnet | 33bef96 + supervisor cleanup | Agent honestly reported +1381% Noop-vs-nil delta; STOPPED before opening PR per briefing. Root cause: §5 abandoned `@autoclosure` for `if let telemetry` guards, which makes Noop-vs-nil measure "cost when ON," not "guard works." User decision: REMOVE the test (don't ship flaky/misleading tests). Supervisor deleted the file + updated REQUIREMENTS §7 row 5 and §10. Zero-cost-when-nil is proven structurally by Sortie 5's 21-sample-site audit + Sortie 6's 5 functional tests. |
 
 ## Active Agents
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 7 | DISPATCHED | 1/3 | sonnet | 8 | _(dispatching)_ | (transcript — do not read) | 2026-05-12 |
+| swift-tuberia-instrumentation | 7 | PARTIAL → COMPLETED (supervisor cleanup) | 1/3 | sonnet | 8 | a7474e7880faec27e | (transcript — do not read) | 2026-05-12 |
 
 ## Decisions Log
 
