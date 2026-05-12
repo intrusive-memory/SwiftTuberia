@@ -771,10 +771,38 @@ public actor DiffusionPipeline<
       )
 
       let conditionalOutput: TextEncoderOutput
+      if let telemetry {
+        await telemetry.capture(
+          .textEncoderForwardStart(
+            role: .conditional,
+            promptLength: encoderInput.text.count,
+            maxLength: encoderInput.maxLength
+          ))
+      }
+      let conditionalEncodeStart = Date()
       do {
         conditionalOutput = try encoder.encode(encoderInput)
       } catch {
+        if let telemetry {
+          await telemetry.capture(
+            .errorThrown(
+              phase: .textEncoderForward,
+              errorDescription: "Conditional encoding failed: \(error)",
+              stepIndex: nil
+            ))
+        }
         throw PipelineError.encodingFailed(reason: String(describing: error))
+      }
+      if let telemetry {
+        let embeddingStat = TuberiaTensorStat.sample(conditionalOutput.embeddings)
+        let maskStat = TuberiaTensorStat.sample(conditionalOutput.mask)
+        await telemetry.capture(
+          .textEncoderForwardComplete(
+            role: .conditional,
+            embeddingStat: embeddingStat,
+            maskStat: maskStat,
+            durationSeconds: Date().timeIntervalSince(conditionalEncodeStart)
+          ))
       }
       progress(.encoding(fraction: 0.5))
 
@@ -789,10 +817,40 @@ public actor DiffusionPipeline<
             text: request.negativePrompt ?? "",
             maxLength: encoder.maxSequenceLength
           )
+          if let telemetry {
+            await telemetry.capture(
+              .textEncoderForwardStart(
+                role: .unconditional,
+                promptLength: uncondInput.text.count,
+                maxLength: uncondInput.maxLength
+              ))
+          }
+          let unconditionalEncodeStart = Date()
+          let uncondEncodeResult: TextEncoderOutput
           do {
-            unconditionalOutput = try encoder.encode(uncondInput)
+            uncondEncodeResult = try encoder.encode(uncondInput)
           } catch {
+            if let telemetry {
+              await telemetry.capture(
+                .errorThrown(
+                  phase: .textEncoderForward,
+                  errorDescription: "Unconditional encoding failed: \(error)",
+                  stepIndex: nil
+                ))
+            }
             throw PipelineError.encodingFailed(reason: "Unconditional encoding failed: \(error)")
+          }
+          unconditionalOutput = uncondEncodeResult
+          if let telemetry {
+            let embeddingStat = TuberiaTensorStat.sample(uncondEncodeResult.embeddings)
+            let maskStat = TuberiaTensorStat.sample(uncondEncodeResult.mask)
+            await telemetry.capture(
+              .textEncoderForwardComplete(
+                role: .unconditional,
+                embeddingStat: embeddingStat,
+                maskStat: maskStat,
+                durationSeconds: Date().timeIntervalSince(unconditionalEncodeStart)
+              ))
           }
 
         case .zeroVector(let shape):
@@ -869,6 +927,30 @@ public actor DiffusionPipeline<
       scheduler.reset()
       let plan = scheduler.configure(steps: request.steps, startTimestep: startTimestep)
       let timesteps = plan.timesteps
+
+      if let telemetry {
+        // Defensive head/tail slices: take min(5, count) so short schedules don't crash.
+        let tsCount = plan.timesteps.count
+        let tsHeadEnd = min(5, tsCount)
+        let tsTailStart = max(tsCount - 5, 0)
+        let timestepsHead = Array(plan.timesteps[0..<tsHeadEnd])
+        let timestepsTail = Array(plan.timesteps[tsTailStart...])
+        let sigCount = plan.sigmas.count
+        let sigHeadEnd = min(5, sigCount)
+        let sigTailStart = max(sigCount - 5, 0)
+        let sigmasHead = Array(plan.sigmas[0..<sigHeadEnd])
+        let sigmasTail = Array(plan.sigmas[sigTailStart...])
+        await telemetry.capture(
+          .schedulerConfigured(
+            steps: request.steps,
+            startTimestep: startTimestep,
+            predictionType: scheduler.predictionType,
+            timestepsHead: timestepsHead,
+            timestepsTail: timestepsTail,
+            sigmasHead: sigmasHead,
+            sigmasTail: sigmasTail
+          ))
+      }
 
       // --- Step 4: Denoising loop ---
       let totalSteps = timesteps.count
