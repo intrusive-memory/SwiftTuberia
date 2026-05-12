@@ -37,14 +37,20 @@
 ### swift-tuberia-instrumentation
 
 - Work unit state: RUNNING
-- Current sortie: 5 of 7 (the cost-critical hot-path discipline sortie)
+- Current sortie: 6 of 7
 - Sortie state: DISPATCHED
 - Sortie type: code
-- Model: opus
-- Complexity score: 13 (turns 8 + foundation 2 + risk 3; opus by threshold AND by overhead-bar criticality)
+- Model: sonnet
+- Complexity score: 13 by algorithm (overweights file count); plan rates risk 2 / complexity 2. Sonnet chosen — retry rules upgrade to opus on failure.
 - Attempt: 1 of 3
-- Last verified: Sortie 4 commit 43d88e2 — make build SUCCEEDED, make test 32/32 pass (independent re-run). 7 emission sites + 4 sample() calls all inside guards. Scheduler protocol gained `predictionType: String` default — FlowMatchEulerScheduler inherits "unknown" (long-term cleanup).
-- Notes: Hot path. +1% overhead bar depends on this sortie's discipline. Briefing explicitly hammers "ZERO sample() calls outside guards" + anti-pattern example + verbatim helper signature. Anchor drift expected at +300..+500 lines from plan refs.
+- Last verified: Sortie 5 commit 195f83c — make build SUCCEEDED. 21 sample() call sites all inside `if let telemetry` guards (verified by independent grep + agent's discipline table). All §5 rows 14-22 wired. emitAnomalyIfPresent helper is `internal` (not `private` as agent claimed) — works cross-file. tuberiaPipelineCanonicalDTypeString duplicates Sortie-1 private helper (15-case dtype switch) — flagged as post-merge cleanup.
+- Notes: 5 functional test files + RecordingTelemetryReporter actor in Tests/TuberiaTests/Support/. Sortie 6 explicitly briefed to NOT touch Sources/ — any discovered bug should STOP and report rather than silently patch.
+
+## Post-merge cleanup queue (not blocking the mission)
+
+- **DType helper DRY violation**: `tuberiaPipelineCanonicalDTypeString` at DiffusionPipeline.swift:16 duplicates `TuberiaTensorStat.canonicalDTypeString` (Sortie 1 private static at TuberiaTensorStat.swift:129). Fix: lift the private helper to `internal` on TuberiaTensorStat and delete the duplicate. Post-merge or Sortie 7 housekeeping.
+- **FlowMatchEulerScheduler.predictionType**: inherits "unknown" from the default. Flow-matching has real prediction semantics that deserve a non-default string. Post-merge follow-up.
+- **emitAnomalyIfPresent access**: currently `internal` (no modifier). Could be tightened to `private` if all call sites move to DiffusionPipeline+Telemetry.swift, but practically OK as-is.
 
 ## Sortie History
 
@@ -55,12 +61,13 @@
 | 3 | COMPLETED | 1/3 | sonnet | c3aa27f | 28 emission sites + per-file throw/errorThrown accounting verified. Build/test/lint green (independently re-run). Init-time observability gap surfaced honestly — fix routed to Sortie 3.5 with user concurrence (defaulted init param). Line-number drift recorded (assembly +117..+220, generate +314, etc.). |
 | 3.5 | COMPLETED | 1/3 | sonnet | 6ec1177 | 3-line patch: defaulted `telemetry:` param on init, `self.telemetry = telemetry` before validateAssembly, telemetry forwarded to validateAssembly. Source-compat (existing `init(recipe:)` callers unchanged). Build/test/lint green per agent + spot-check. |
 | 4 | COMPLETED | 1/3 | sonnet | 43d88e2 | 7 emission sites (4 textEncoder pairs + 1 schedulerConfigured) + 4 sample() calls (all inside guards, lines 797/798/845/846). Scheduler protocol grew `predictionType: String` default — non-DPM schedulers inherit "unknown" (flagged as downstream cleanup, not a blocker). Build/test/lint green (independently re-run). |
+| 5 | COMPLETED | 1/3 | opus | 195f83c | THE HOT-PATH SORTIE. 17 new emission sites + 5 errorThrown + 17 anomaly-helper invocations. 21 sample() calls total (4 from S4 + 17 from S5), every one inside an `if let telemetry` guard (discipline table verified by both agent and supervisor). All §5 rows 14-22 wired. Build/test/lint green. Two minor surfacings (DType helper duplication; internal vs private on helper) — both post-merge cleanups, not blockers. |
 
 ## Active Agents
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 5 | DISPATCHED | 1/3 | opus | 13 | ae4b05bc0e14c8ce6 | (transcript — do not read) | 2026-05-12 |
+| swift-tuberia-instrumentation | 6 | DISPATCHED | 1/3 | sonnet | 13 (alg) / 8 (plan) | a99d2a8c341b1d39a | (transcript — do not read) | 2026-05-12 |
 
 ## Decisions Log
 
