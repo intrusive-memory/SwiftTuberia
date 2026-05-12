@@ -37,26 +37,27 @@
 ### swift-tuberia-instrumentation
 
 - Work unit state: RUNNING
-- Current sortie: 2 of 7
+- Current sortie: 3 of 7
 - Sortie state: DISPATCHED
 - Sortie type: code
-- Model: opus
-- Complexity score: 13 (turns 3 + files 2 + foundation 5 + dep-depth 2 + risk 1; force-opus override: foundation=1 ∧ dep-depth=5)
+- Model: sonnet
+- Complexity score: 11 (turns 5 + files 2 + foundation 0 + dep-count 2 + risk 2; no override fires)
 - Attempt: 1 of 3
-- Last verified: Sortie 1 commit 9ccee09 verified — 4 files present, public ABI confirmed by grep, no fatalError, threshold knob present, make build/test/lint all green per agent + spot-check
-- Notes: Mechanical defaulted-param plumbing across 4 files + 1 new extension file. Plan rates complexity 1, but force-opus fires because this sets the pattern Sorties 3-7 all consume.
+- Last verified: Sortie 2 commit de702b5 — make build SUCCEEDED, make test 32/32 pass (independent supervisor verification, not just agent claim). SourceKit diagnostics on dispatch were stale-index false-positives; build is genuinely clean.
+- Notes: Lifecycle + assembly + memory + weight + LoRA emission across ~20 sites. Rigid `if let telemetry { ... }` template. Not hot-path — Sortie 3 misses cost zero overhead because lifecycle runs once per generate() call.
 
 ## Sortie History
 
 | Sortie | State | Attempt | Model | Commit | Verified |
 |--------|-------|---------|-------|--------|----------|
 | 1 | COMPLETED | 1/3 | opus | 9ccee09 | Files present, public ABI green, build/test/lint clean. 2 surfacings (nonisolated(unsafe) var; pre-reduction f32 cast) — both accepted, see Decisions Log. |
+| 2 | COMPLETED | 1/3 | opus | de702b5 | 5 files modified; setTelemetry + private ivar + 4 defaulted params; make build + make test (32/32) independently re-run by supervisor (not just agent claim). SourceKit diagnostics were stale-index false-positives. memoryGate type widening was wider than plan asked — accepted, see Decisions Log. |
 
 ## Active Agents
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 2 | DISPATCHED | 1/3 | opus | 13 | a202b9c21328f2ad4 | (transcript — do not read) | 2026-05-12 |
+| swift-tuberia-instrumentation | 3 | DISPATCHED | 1/3 | sonnet | 11 | aeaddf86978f057d9 | (transcript — do not read) | 2026-05-12 |
 
 ## Decisions Log
 
@@ -70,9 +71,12 @@
 | 2026-05-12 | swift-tuberia-instrumentation | 1 | Sortie 1 COMPLETED — accept `nonisolated(unsafe) static var` for defaultOutOfRangeThreshold | Plan Q2 required a `var` for runtime override. Swift 6 strict concurrency forbids plain mutable globals; alternatives (`let`, actor wrap) break the override intent or call-site simplicity. Pragmatic accept; document in PR description. |
 | 2026-05-12 | swift-tuberia-instrumentation | 1 | Sortie 1 COMPLETED — accept pre-reduction `.float32` cast in `sample()` | Defensive against fp16/bfloat16 overflow (mirrors T5RMSNorm precedent in AGENTS.md v0.6.1). Cost is one extra MLX op per sample() call, but sample() is never called when telemetry is nil — doesn't affect the +1% overhead bar measured in Sortie 7. |
 | 2026-05-12 | swift-tuberia-instrumentation | 2 | Model: opus | Complexity score 13. Plan rates work as "complexity 1, risk 1" (mechanical defaulted-param plumbing) but force-opus override fires (foundation=1 ∧ dep-depth=5). Cost is intentional: getting a parameter type wrong here breaks every emission sortie. |
+| 2026-05-12 | swift-tuberia-instrumentation | 2 | Sortie 2 COMPLETED — accept `memoryGate` type widening | Plan asked only that the default closure forward `self.telemetry`. Swift 6 nonisolated-init rules blocked the obvious property-default approach; the agent widened the gate type to `(UInt64, (any TuberiaTelemetryReporter)?) async throws -> Void` and preserved source compat for `setMemoryGate(_:)` by wrapping legacy single-arg closures with `_ in`. Trade-off: custom gates installed via the legacy seam will never see telemetry (documented inline; only test stubs use that seam, so acceptable). |
+| 2026-05-12 | swift-tuberia-instrumentation | 2 | Note: `WeightLoader.load` has 2 extra defaulted params (`tensorTransform`, `quantization`) beyond §4.3 | Q3-style anchor drift. Agent appended `telemetry:` at the end; fully source-compatible. Worth recording for Sortie 3+ when emission sites need to know the actual signature. |
+| 2026-05-12 | swift-tuberia-instrumentation | 3 | Model: sonnet | Complexity score 11 (foundation=0, dep-count=4 → 2 points, risk=2). No force-opus override. Mechanical emission template across ~20 sites; not hot-path; misses cost zero overhead. Sonnet adequate; retry rules upgrade to opus on failure. |
 
 ## Overall Status
 
-**State**: RUNNING — Sortie 1 COMPLETED ✓. Sortie 2 (opus, async) dispatching.
+**State**: RUNNING — Sorties 1+2 COMPLETED ✓. Sortie 3 (sonnet, async) dispatching.
 
-**Next action**: When Sortie 2 completes, run verification cascade and transition. On COMPLETED, dispatch Sortie 3.
+**Next action**: When Sortie 3 completes, run verification cascade (grep counts on emission sites, build/test/lint, errorThrown coverage check on assembly+loadModels+LoRA/Weight loader throws). On COMPLETED, dispatch Sortie 4.
