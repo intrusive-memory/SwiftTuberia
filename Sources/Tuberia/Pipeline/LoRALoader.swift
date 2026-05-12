@@ -23,16 +23,21 @@ public struct LoRALoader: Sendable {
   /// - Parameters:
   ///   - config: The LoRA configuration specifying the adapter source.
   ///   - keyMapping: The backbone's key mapping to translate LoRA key names.
+  ///   - telemetry: Optional telemetry reporter forwarded from
+  ///     `DiffusionPipeline`. Defaults to `nil` so existing call sites compile
+  ///     unchanged. Sortie 3+ will wire emission sites against this parameter.
   /// - Returns: Raw LoRA parameters (lora_A and lora_B pairs, keyed by original names).
   /// - Throws: `PipelineError.weightLoadingFailed` if loading fails.
   public static func loadAdapterWeights(
     config: LoRAConfig,
-    keyMapping: KeyMapping
+    keyMapping: KeyMapping,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) async throws -> ModuleParameters {
     if let componentId = config.componentId {
       return try await WeightLoader.load(
         componentId: componentId,
-        keyMapping: keyMapping
+        keyMapping: keyMapping,
+        telemetry: telemetry
       )
     } else if let localPath = config.localPath {
       return try await WeightLoader.loadFromPath(
@@ -41,9 +46,14 @@ public struct LoRALoader: Sendable {
       )
     } else {
       // Should not happen due to precondition in LoRAConfig.init
+      let reason = "LoRAConfig has neither componentId nor localPath"
+      if let telemetry {
+        await telemetry.capture(
+          .errorThrown(phase: .loraLoad, errorDescription: reason, stepIndex: nil))
+      }
       throw PipelineError.weightLoadingFailed(
         component: "unknown",
-        reason: "LoRAConfig has neither componentId nor localPath"
+        reason: reason
       )
     }
   }
@@ -58,13 +68,21 @@ public struct LoRALoader: Sendable {
   ///   - adapterWeights: The loaded LoRA parameters containing lora_A/lora_B pairs.
   ///   - baseParameters: The current base model parameters to merge into.
   ///   - scale: Adapter strength (0.0 = no effect, 1.0 = full effect).
+  ///   - telemetry: Optional telemetry reporter forwarded from
+  ///     `DiffusionPipeline`. Defaults to `nil` so existing call sites compile
+  ///     unchanged. Sortie 3+ will wire `loraApplied` against this parameter.
   /// - Returns: A new `ModuleParameters` with LoRA merged into matching keys.
   ///   Keys not matched by the adapter are passed through unchanged.
   public static func apply(
     adapterWeights: ModuleParameters,
     to baseParameters: ModuleParameters,
-    scale: Float
+    scale: Float,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
   ) -> ModuleParameters {
+    // telemetry is accepted here for API symmetry with the DiffusionPipeline call site,
+    // which emits loraApplied after calling this method. No emission occurs inside apply()
+    // itself since the merge is synchronous and emission happens at the call site.
+    _ = telemetry
     var merged = baseParameters.parameters
 
     // Group adapter weights by their base key (strip .lora_A / .lora_B suffix)

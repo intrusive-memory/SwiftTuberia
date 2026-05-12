@@ -52,6 +52,12 @@ public final class DPMSolverScheduler: Scheduler, @unchecked Sendable {
 
   // MARK: - Scheduler Protocol
 
+  /// Returns the prediction type from the scheduler's configuration as a
+  /// plain string (e.g. `"epsilon"`, `"velocity"`, `"sample"`). Overrides
+  /// the default `"unknown"` in the `Scheduler` protocol extension so the
+  /// `schedulerConfigured` telemetry event carries a meaningful value.
+  public var predictionType: String { configuration.predictionType.rawValue }
+
   public func configure(steps: Int, startTimestep: Int?) -> SchedulerPlan {
     // Compute evenly spaced timesteps from trainTimesteps-1 down to 0
     let stepRatio = Float(trainTimesteps) / Float(steps)

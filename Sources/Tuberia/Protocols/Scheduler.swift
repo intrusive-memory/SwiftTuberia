@@ -67,4 +67,16 @@ extension Scheduler {
   public func configure(steps: Int) -> SchedulerPlan {
     configure(steps: steps, startTimestep: nil)
   }
+
+  /// A human-readable string describing the prediction type used by this
+  /// scheduler (e.g. `"epsilon"`, `"velocity"`, `"sample"`).
+  ///
+  /// The default implementation returns `"unknown"`. Concrete schedulers that
+  /// expose a configuration-level `predictionType` should override this to
+  /// return `configuration.predictionType.rawValue`.
+  ///
+  /// Used by the `schedulerConfigured` telemetry event (OPERATION GLASS PIPES
+  /// Sortie 4) so the host can log the prediction-type string without knowing
+  /// the concrete scheduler type.
+  public var predictionType: String { "unknown" }
 }

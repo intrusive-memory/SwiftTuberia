@@ -84,7 +84,19 @@ public actor MemoryManager {
 
   /// Hard validation: throws `PipelineError.insufficientMemory` if the budget is exceeded.
   /// Use this as a gate before committing to a load operation.
-  public func hardValidate(requiredBytes: UInt64) throws {
+  ///
+  /// - Parameters:
+  ///   - requiredBytes: The memory budget to validate against.
+  ///   - telemetry: Optional telemetry reporter forwarded from
+  ///     `DiffusionPipeline.memoryGate`. Defaults to `nil` so existing call
+  ///     sites compile unchanged. Sortie 3+ will wire `memoryGateChecked` /
+  ///     `errorThrown` against this parameter.
+  public func hardValidate(
+    requiredBytes: UInt64,
+    telemetry: (any TuberiaTelemetryReporter)? = nil
+  ) throws {
+    // Plumbing only — no emission yet (Sortie 2).
+    _ = telemetry
     let available = availableMemory
     guard available >= requiredBytes else {
       throw PipelineError.insufficientMemory(
