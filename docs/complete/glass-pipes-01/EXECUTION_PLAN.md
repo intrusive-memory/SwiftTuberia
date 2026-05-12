@@ -13,6 +13,7 @@ iteration: 1
 release_type: minor
 refined: true
 refine_passes: [atomicity, priority, parallelism, questions]
+state: completed
 ---
 
 # EXECUTION_PLAN.md — SwiftTuberia Instrumentation

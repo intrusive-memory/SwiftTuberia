@@ -1,3 +1,11 @@
+---
+name: REQUIREMENTS-instrumentation
+mission: swift-tuberia-instrumentation
+feature_name: OPERATION GLASS PIPES
+iteration: 1
+state: completed
+---
+
 # SwiftTuberia — Instrumentation Requirements
 
 **Status:** Draft, awaiting implementation

@@ -1,3 +1,11 @@
+---
+name: SUPERVISOR_STATE
+mission: swift-tuberia-instrumentation
+feature_name: OPERATION GLASS PIPES
+iteration: 1
+state: completed
+---
+
 # SUPERVISOR_STATE.md — OPERATION GLASS PIPES
 
 > **Terminology reminder**: A *mission* is the definable scope of work. A *sortie* is an atomic agent task within that mission.
