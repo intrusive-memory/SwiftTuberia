@@ -37,14 +37,14 @@
 ### swift-tuberia-instrumentation
 
 - Work unit state: RUNNING
-- Current sortie: 6 of 7
+- Current sortie: 7 of 7 — the +1% overhead bar + PR open
 - Sortie state: DISPATCHED
 - Sortie type: code
 - Model: sonnet
-- Complexity score: 13 by algorithm (overweights file count); plan rates risk 2 / complexity 2. Sonnet chosen — retry rules upgrade to opus on failure.
+- Complexity score: 8 (turns 5 + risk 3). Structured work + high-stakes measurement. Sonnet chosen because the work IS structured; the risk is in the agent reporting honestly when the measurement comes in.
 - Attempt: 1 of 3
-- Last verified: Sortie 5 commit 195f83c — make build SUCCEEDED. 21 sample() call sites all inside `if let telemetry` guards (verified by independent grep + agent's discipline table). All §5 rows 14-22 wired. emitAnomalyIfPresent helper is `internal` (not `private` as agent claimed) — works cross-file. tuberiaPipelineCanonicalDTypeString duplicates Sortie-1 private helper (15-case dtype switch) — flagged as post-merge cleanup.
-- Notes: 5 functional test files + RecordingTelemetryReporter actor in Tests/TuberiaTests/Support/. Sortie 6 explicitly briefed to NOT touch Sources/ — any discovered bug should STOP and report rather than silently patch.
+- Last verified: Sortie 6 commit e852d18 — make build/test/lint green. 47 tests in TuberiaTests target (+15 from Sortie 6). RecordingTelemetryReporter actor + 5 test files. Two spec drifts surfaced (assembly ordering, backbone phase strings) — both resolved via REQUIREMENTS-instrumentation.md edits (not production changes).
+- Notes: Reuses Sortie 6's Mock fixtures. Must NOT cut release tag — that's post-merge supervisor work using "our next minor release version" terminology (no concrete version numbers).
 
 ## Post-merge cleanup queue (not blocking the mission)
 
@@ -62,12 +62,13 @@
 | 3.5 | COMPLETED | 1/3 | sonnet | 6ec1177 | 3-line patch: defaulted `telemetry:` param on init, `self.telemetry = telemetry` before validateAssembly, telemetry forwarded to validateAssembly. Source-compat (existing `init(recipe:)` callers unchanged). Build/test/lint green per agent + spot-check. |
 | 4 | COMPLETED | 1/3 | sonnet | 43d88e2 | 7 emission sites (4 textEncoder pairs + 1 schedulerConfigured) + 4 sample() calls (all inside guards, lines 797/798/845/846). Scheduler protocol grew `predictionType: String` default — non-DPM schedulers inherit "unknown" (flagged as downstream cleanup, not a blocker). Build/test/lint green (independently re-run). |
 | 5 | COMPLETED | 1/3 | opus | 195f83c | THE HOT-PATH SORTIE. 17 new emission sites + 5 errorThrown + 17 anomaly-helper invocations. 21 sample() calls total (4 from S4 + 17 from S5), every one inside an `if let telemetry` guard (discipline table verified by both agent and supervisor). All §5 rows 14-22 wired. Build/test/lint green. Two minor surfacings (DType helper duplication; internal vs private on helper) — both post-merge cleanups, not blockers. |
+| 6 | COMPLETED | 1/3 | sonnet | e852d18 | 5 test files + RecordingTelemetryReporter actor. 47 tests passing (+15 new). Surfaced two real spec drifts (assembly ordering; backbone phase strings) without silently patching production — both resolved by user-confirmed REQUIREMENTS edits rather than production changes. No production-code bugs found. |
 
 ## Active Agents
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 6 | DISPATCHED | 1/3 | sonnet | 13 (alg) / 8 (plan) | a99d2a8c341b1d39a | (transcript — do not read) | 2026-05-12 |
+| swift-tuberia-instrumentation | 7 | DISPATCHED | 1/3 | sonnet | 8 | _(dispatching)_ | (transcript — do not read) | 2026-05-12 |
 
 ## Decisions Log
 
