@@ -36,4 +36,47 @@ extension DiffusionPipeline {
     // cross file boundaries for `private`.
     self.installTelemetry(reporter)
   }
+
+  // MARK: - Numerical Anomaly Side-Channel (OPERATION GLASS PIPES Sortie 5)
+  //
+  // Emits one (or more) `.numericalAnomaly` events when a freshly-sampled
+  // `TuberiaTensorStat` exhibits NaN, Inf, or out-of-range values. The
+  // threshold for `outOfRange` is `TuberiaTensorStat.defaultOutOfRangeThreshold`
+  // (currently `1e6` — see Q2 of the GLASS PIPES execution plan).
+  //
+  // **Discipline.** This helper takes a NON-OPTIONAL reporter on purpose: every
+  // call site is already inside an `if let telemetry { ... }` block, so the
+  // caller has unwrapped the optional. Forcing non-optionality at the helper
+  // boundary prevents a future caller from accidentally invoking the helper
+  // outside the guard and re-introducing the cost-when-off hazard that Sortie 7
+  // measures.
+  //
+  // **Purity.** The helper does not call `TuberiaTensorStat.sample(...)`; it
+  // only inspects the already-constructed stat. No new MLX reductions run.
+  //
+  // **Multiple emissions.** A single stat can fire all three kinds (e.g. a
+  // tensor that is mostly NaN/Inf with one out-of-range survivor). Each kind
+  // fires as a separate event so the adapter on the host side can route them
+  // to distinct phase suffixes (`tuberia_anomaly_<kind>`).
+  func emitAnomalyIfPresent(
+    reporter: any TuberiaTelemetryReporter,
+    stat: TuberiaTensorStat,
+    phase: String,
+    stepIndex: Int?
+  ) async {
+    let threshold = TuberiaTensorStat.defaultOutOfRangeThreshold
+    let outOfRange = abs(stat.max) > threshold || abs(stat.min) > threshold
+    if stat.hasNaN {
+      await reporter.capture(
+        .numericalAnomaly(phase: phase, kind: .nan, stepIndex: stepIndex, stat: stat))
+    }
+    if stat.hasInf {
+      await reporter.capture(
+        .numericalAnomaly(phase: phase, kind: .inf, stepIndex: stepIndex, stat: stat))
+    }
+    if outOfRange {
+      await reporter.capture(
+        .numericalAnomaly(phase: phase, kind: .outOfRange, stepIndex: stepIndex, stat: stat))
+    }
+  }
 }

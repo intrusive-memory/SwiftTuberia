@@ -3,6 +3,35 @@ import Foundation
 @preconcurrency import MLX
 import MLXRandom
 
+// MARK: - File-local helpers (OPERATION GLASS PIPES Sortie 5)
+
+/// Map an MLX `DType` to its canonical lowercase string. Mirrors the names used
+/// by the host-side adapter's `tuberia_cfg_cast_<from>_to_<to>` phase suffix.
+///
+/// Duplicated from `TuberiaTensorStat.canonicalDTypeString(_:)` (which is
+/// `private` to that file and intentionally not lifted into the public surface)
+/// so the `cfgDtypeCast` emission site can record the pre-cast dtype without
+/// having to sample the pre-cast tensor twice. Kept `fileprivate` so it stays
+/// scoped to the pipeline file.
+private func tuberiaPipelineCanonicalDTypeString(_ dtype: DType) -> String {
+  switch dtype {
+  case .bool: return "bool"
+  case .uint8: return "uint8"
+  case .uint16: return "uint16"
+  case .uint32: return "uint32"
+  case .uint64: return "uint64"
+  case .int8: return "int8"
+  case .int16: return "int16"
+  case .int32: return "int32"
+  case .int64: return "int64"
+  case .float16: return "float16"
+  case .float32: return "float32"
+  case .bfloat16: return "bfloat16"
+  case .complex64: return "complex64"
+  case .float64: return "float64"
+  }
+}
+
 /// The standard pipeline for all diffusion-based generation (images, video, non-speech audio).
 ///
 /// Composed from five pipe segments: TextEncoder, Scheduler, Backbone, Decoder, Renderer.
@@ -889,6 +918,14 @@ public actor DiffusionPipeline<
       {
         // Image-to-image: encode reference, add noise
         guard let bidirectionalDecoder = decoder as? any BidirectionalDecoder else {
+          if let telemetry {
+            await telemetry.capture(
+              .errorThrown(
+                phase: .decoderDecode,
+                errorDescription: "Image-to-image requires a BidirectionalDecoder",
+                stepIndex: 0
+              ))
+          }
           throw PipelineError.generationFailed(
             step: 0,
             reason: "Image-to-image requires a BidirectionalDecoder"
@@ -913,6 +950,14 @@ public actor DiffusionPipeline<
             latents = imageLatents
           }
         } catch {
+          if let telemetry {
+            await telemetry.capture(
+              .errorThrown(
+                phase: .decoderDecode,
+                errorDescription: "Failed to encode reference image: \(error)",
+                stepIndex: 0
+              ))
+          }
           throw PipelineError.generationFailed(
             step: 0,
             reason: "Failed to encode reference image: \(error)"
@@ -959,6 +1004,36 @@ public actor DiffusionPipeline<
         progress(.generating(step: stepIndex + 1, totalSteps: totalSteps, elapsed: elapsed))
 
         let timestepArray = MLXArray(Int32(timestep))
+        let stepStartTime = Date()
+        let sigma: Float = stepIndex < plan.sigmas.count ? plan.sigmas[stepIndex] : 0
+
+        // Capture pre-step latent stat for both .denoiseStepStart and
+        // .denoiseStepComplete (the latter compares against it via the host
+        // adapter). Sampling is gated behind the telemetry guard so the eight
+        // MLX reductions never run when telemetry is nil (Sortie 7 +1% bar).
+        if let telemetry {
+          let latentBeforeStat = TuberiaTensorStat.sample(latents)
+          await telemetry.capture(
+            .denoiseStepStart(
+              stepIndex: stepIndex,
+              totalSteps: totalSteps,
+              timestep: timestep,
+              sigma: sigma,
+              useCFG: useCFG,
+              latentBeforeStat: latentBeforeStat
+            ))
+          await emitAnomalyIfPresent(
+            reporter: telemetry,
+            stat: latentBeforeStat,
+            phase: "denoise_step_start",
+            stepIndex: stepIndex
+          )
+        }
+
+        // `prediction` holds the noise estimate that crosses the
+        // backbone → scheduler boundary. Captured as `var` so both CFG and
+        // non-CFG branches can publish it to `denoiseStepComplete`.
+        let prediction: MLXArray
 
         do {
           if useCFG, let uncondEmb = unconditionalOutput {
@@ -976,19 +1051,120 @@ public actor DiffusionPipeline<
               timestep: timestepArray
             )
 
+            // Unconditional pass
+            if let telemetry {
+              let conditioningStat = TuberiaTensorStat.sample(uncondInput.conditioning)
+              let latentStat = TuberiaTensorStat.sample(uncondInput.latents)
+              await telemetry.capture(
+                .backboneForwardStart(
+                  branch: .cfgUnconditional,
+                  conditioningStat: conditioningStat,
+                  latentStat: latentStat,
+                  timestep: timestep
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: conditioningStat,
+                phase: "backbone_forward_start_cfg_unconditional",
+                stepIndex: stepIndex
+              )
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: latentStat,
+                phase: "backbone_forward_start_cfg_unconditional",
+                stepIndex: stepIndex
+              )
+            }
+            let uncondBackboneStart = Date()
             let uncondPrediction = try backbone.forward(uncondInput)
+            if let telemetry {
+              let predictionStat = TuberiaTensorStat.sample(uncondPrediction)
+              await telemetry.capture(
+                .backboneForwardComplete(
+                  branch: .cfgUnconditional,
+                  predictionStat: predictionStat,
+                  durationSeconds: Date().timeIntervalSince(uncondBackboneStart)
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: predictionStat,
+                phase: "backbone_forward_complete_cfg_unconditional",
+                stepIndex: stepIndex
+              )
+            }
+
+            // Conditional pass
+            if let telemetry {
+              let conditioningStat = TuberiaTensorStat.sample(condInput.conditioning)
+              let latentStat = TuberiaTensorStat.sample(condInput.latents)
+              await telemetry.capture(
+                .backboneForwardStart(
+                  branch: .cfgConditional,
+                  conditioningStat: conditioningStat,
+                  latentStat: latentStat,
+                  timestep: timestep
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: conditioningStat,
+                phase: "backbone_forward_start_cfg_conditional",
+                stepIndex: stepIndex
+              )
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: latentStat,
+                phase: "backbone_forward_start_cfg_conditional",
+                stepIndex: stepIndex
+              )
+            }
+            let condBackboneStart = Date()
             let condPrediction = try backbone.forward(condInput)
+            if let telemetry {
+              let predictionStat = TuberiaTensorStat.sample(condPrediction)
+              await telemetry.capture(
+                .backboneForwardComplete(
+                  branch: .cfgConditional,
+                  predictionStat: predictionStat,
+                  durationSeconds: Date().timeIntervalSince(condBackboneStart)
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: predictionStat,
+                phase: "backbone_forward_complete_cfg_conditional",
+                stepIndex: stepIndex
+              )
+            }
 
             // CFG formula: uncond + scale * (cond - uncond)
             // Cast to float32 before scheduler math: backbone weights are float16, and at
             // high-noise timesteps (t≈999, sigma≈157) the DPM-Solver divides by sqrt(alpha_t)≈0.006,
             // amplifying float16 rounding errors 157×. Float32 prevents channel-specific bias
             // accumulation over the 20-step trajectory.
+            let preCastDtype = uncondPrediction.dtype
             let guidedPrediction =
               (uncondPrediction + request.guidanceScale * (condPrediction - uncondPrediction))
               .asType(
                 .float32)
 
+            if let telemetry {
+              let guidedPredictionStat = TuberiaTensorStat.sample(guidedPrediction)
+              let fromDtype = tuberiaPipelineCanonicalDTypeString(preCastDtype)
+              await telemetry.capture(
+                .cfgDtypeCast(
+                  stepIndex: stepIndex,
+                  fromDtype: fromDtype,
+                  toDtype: "float32",
+                  guidedPredictionStat: guidedPredictionStat
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: guidedPredictionStat,
+                phase: "cfg_dtype_cast",
+                stepIndex: stepIndex
+              )
+            }
+
+            prediction = guidedPrediction
             latents = try scheduler.step(
               output: guidedPrediction,
               timestep: timestep,
@@ -1003,16 +1179,82 @@ public actor DiffusionPipeline<
               timestep: timestepArray
             )
 
+            if let telemetry {
+              let conditioningStat = TuberiaTensorStat.sample(input.conditioning)
+              let latentStat = TuberiaTensorStat.sample(input.latents)
+              await telemetry.capture(
+                .backboneForwardStart(
+                  branch: .noCFG,
+                  conditioningStat: conditioningStat,
+                  latentStat: latentStat,
+                  timestep: timestep
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: conditioningStat,
+                phase: "backbone_forward_start_no_cfg",
+                stepIndex: stepIndex
+              )
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: latentStat,
+                phase: "backbone_forward_start_no_cfg",
+                stepIndex: stepIndex
+              )
+            }
+            let noCFGBackboneStart = Date()
+            let rawPrediction = try backbone.forward(input)
             // Cast to float32: see CFG branch comment above.
-            let prediction = try backbone.forward(input).asType(.float32)
+            let preCastDtype = rawPrediction.dtype
+            let castPrediction = rawPrediction.asType(.float32)
+            if let telemetry {
+              let predictionStat = TuberiaTensorStat.sample(rawPrediction)
+              await telemetry.capture(
+                .backboneForwardComplete(
+                  branch: .noCFG,
+                  predictionStat: predictionStat,
+                  durationSeconds: Date().timeIntervalSince(noCFGBackboneStart)
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: predictionStat,
+                phase: "backbone_forward_complete_no_cfg",
+                stepIndex: stepIndex
+              )
 
+              let guidedPredictionStat = TuberiaTensorStat.sample(castPrediction)
+              let fromDtype = tuberiaPipelineCanonicalDTypeString(preCastDtype)
+              await telemetry.capture(
+                .cfgDtypeCast(
+                  stepIndex: stepIndex,
+                  fromDtype: fromDtype,
+                  toDtype: "float32",
+                  guidedPredictionStat: guidedPredictionStat
+                ))
+              await emitAnomalyIfPresent(
+                reporter: telemetry,
+                stat: guidedPredictionStat,
+                phase: "cfg_dtype_cast",
+                stepIndex: stepIndex
+              )
+            }
+
+            prediction = castPrediction
             latents = try scheduler.step(
-              output: prediction,
+              output: castPrediction,
               timestep: timestep,
               sample: latents
             )
           }
         } catch {
+          if let telemetry {
+            await telemetry.capture(
+              .errorThrown(
+                phase: .backboneForward,
+                errorDescription: String(describing: error),
+                stepIndex: stepIndex + 1
+              ))
+          }
           throw PipelineError.generationFailed(
             step: stepIndex + 1,
             reason: String(describing: error)
@@ -1021,24 +1263,144 @@ public actor DiffusionPipeline<
 
         // Evaluate to ensure computation runs
         eval(latents)
+
+        // .denoiseStepComplete after eval so durationSeconds reflects the
+        // realized compute, not the lazily-queued graph.
+        if let telemetry {
+          let latentAfterStat = TuberiaTensorStat.sample(latents)
+          let predictionStat = TuberiaTensorStat.sample(prediction)
+          await telemetry.capture(
+            .denoiseStepComplete(
+              stepIndex: stepIndex,
+              totalSteps: totalSteps,
+              timestep: timestep,
+              sigma: sigma,
+              latentAfterStat: latentAfterStat,
+              predictionStat: predictionStat,
+              durationSeconds: Date().timeIntervalSince(stepStartTime)
+            ))
+          await emitAnomalyIfPresent(
+            reporter: telemetry,
+            stat: latentAfterStat,
+            phase: "denoise_step_complete",
+            stepIndex: stepIndex
+          )
+          await emitAnomalyIfPresent(
+            reporter: telemetry,
+            stat: predictionStat,
+            phase: "denoise_step_complete",
+            stepIndex: stepIndex
+          )
+        }
       }
 
       // --- Step 5: Decode latents ---
       progress(.decoding)
+      let decoderScalingFactor = decoder.scalingFactor
+      if let telemetry {
+        let latentStat = TuberiaTensorStat.sample(latents)
+        await telemetry.capture(
+          .decoderDecodeStart(latentStat: latentStat, scalingFactor: decoderScalingFactor))
+        await emitAnomalyIfPresent(
+          reporter: telemetry,
+          stat: latentStat,
+          phase: "decoder_decode_start",
+          stepIndex: nil
+        )
+      }
       let decodedOutput: DecodedOutput
+      let decoderStart = Date()
       do {
         decodedOutput = try decoder.decode(latents)
       } catch {
+        if let telemetry {
+          await telemetry.capture(
+            .errorThrown(
+              phase: .decoderDecode,
+              errorDescription: String(describing: error),
+              stepIndex: nil
+            ))
+        }
         throw PipelineError.decodingFailed(reason: String(describing: error))
+      }
+      if let telemetry {
+        let outputStat = TuberiaTensorStat.sample(decodedOutput.data)
+        await telemetry.capture(
+          .decoderDecodeComplete(
+            outputStat: outputStat,
+            durationSeconds: Date().timeIntervalSince(decoderStart)
+          ))
+        await emitAnomalyIfPresent(
+          reporter: telemetry,
+          stat: outputStat,
+          phase: "decoder_decode_complete",
+          stepIndex: nil
+        )
       }
 
       // --- Step 6: Render output ---
       progress(.rendering)
+      // Pre-renderer modality is derived from the decoded-output shape so the
+      // start-event can be emitted before the renderer runs (the rendered
+      // output's enum tag is what authoritatively decides modality post-hoc).
+      let preRenderModality: String
+      if decodedOutput.metadata is AudioDecoderMetadata {
+        preRenderModality = "audio"
+      } else if decodedOutput.metadata is ImageDecoderMetadata {
+        preRenderModality = "image"
+      } else {
+        preRenderModality = "unknown"
+      }
+      if let telemetry {
+        let inputStat = TuberiaTensorStat.sample(decodedOutput.data)
+        await telemetry.capture(
+          .rendererRenderStart(modality: preRenderModality, inputStat: inputStat))
+        await emitAnomalyIfPresent(
+          reporter: telemetry,
+          stat: inputStat,
+          phase: "renderer_render_start",
+          stepIndex: nil
+        )
+      }
       let renderedOutput: RenderedOutput
+      let rendererStart = Date()
       do {
         renderedOutput = try renderer.render(decodedOutput)
       } catch {
+        if let telemetry {
+          await telemetry.capture(
+            .errorThrown(
+              phase: .rendererRender,
+              errorDescription: String(describing: error),
+              stepIndex: nil
+            ))
+        }
         throw PipelineError.renderingFailed(reason: String(describing: error))
+      }
+      if let telemetry {
+        // Estimate output byte count from the rendered modality. For CGImages
+        // we read CG's reported `bytesPerRow * height`; for audio we use the
+        // PCM buffer's `data.count`; for video we sum CGImage byte counts.
+        // No tensor copies, no extra `eval()` calls — Rule 5 of the Sortie 5
+        // discipline (estimate from output shape, do not materialize).
+        let outputBytes: Int
+        switch renderedOutput {
+        case .image(let cgImage):
+          outputBytes = cgImage.bytesPerRow * cgImage.height
+        case .audio(let audioData):
+          outputBytes = audioData.data.count
+        case .video(let videoFrames):
+          var total = 0
+          for frame in videoFrames.frames {
+            total += frame.bytesPerRow * frame.height
+          }
+          outputBytes = total
+        }
+        await telemetry.capture(
+          .rendererRenderComplete(
+            outputBytes: outputBytes,
+            durationSeconds: Date().timeIntervalSince(rendererStart)
+          ))
       }
 
       // LoRA: restore base weights after generation by subtracting the adapter delta.
