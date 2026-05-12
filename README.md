@@ -1,6 +1,6 @@
 # SwiftTuberia
 
-**v0.7.0** — Componentized generation pipeline for MLX inference.
+**v0.7.0-dev** — Componentized generation pipeline for MLX inference.
 
 ## Overview
 
