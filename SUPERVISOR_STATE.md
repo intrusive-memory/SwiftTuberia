@@ -37,14 +37,14 @@
 ### swift-tuberia-instrumentation
 
 - Work unit state: RUNNING
-- Current sortie: 4 of 7
+- Current sortie: 5 of 7 (the cost-critical hot-path discipline sortie)
 - Sortie state: DISPATCHED
 - Sortie type: code
-- Model: sonnet
-- Complexity score: 6 (turns 3 + foundation 2 + risk 1; bottom of sonnet range)
+- Model: opus
+- Complexity score: 13 (turns 8 + foundation 2 + risk 3; opus by threshold AND by overhead-bar criticality)
 - Attempt: 1 of 3
-- Last verified: Sortie 3.5 commit 6ec1177 — init now accepts defaulted `telemetry:` param, `self.telemetry = telemetry` assigned before validateAssembly; spot-checked the diff; agent reports make build/test/lint green.
-- Notes: Text-encoder + scheduler emission only. Well-anchored mechanical work; line-number drift expected to be significant (Sortie 3 added ~28 sites). Agent explicitly briefed to grep first, record drift in commit body.
+- Last verified: Sortie 4 commit 43d88e2 — make build SUCCEEDED, make test 32/32 pass (independent re-run). 7 emission sites + 4 sample() calls all inside guards. Scheduler protocol gained `predictionType: String` default — FlowMatchEulerScheduler inherits "unknown" (long-term cleanup).
+- Notes: Hot path. +1% overhead bar depends on this sortie's discipline. Briefing explicitly hammers "ZERO sample() calls outside guards" + anti-pattern example + verbatim helper signature. Anchor drift expected at +300..+500 lines from plan refs.
 
 ## Sortie History
 
@@ -54,12 +54,13 @@
 | 2 | COMPLETED | 1/3 | opus | de702b5 | 5 files modified; setTelemetry + private ivar + 4 defaulted params; make build + make test (32/32) independently re-run by supervisor (not just agent claim). SourceKit diagnostics were stale-index false-positives. memoryGate type widening was wider than plan asked — accepted, see Decisions Log. |
 | 3 | COMPLETED | 1/3 | sonnet | c3aa27f | 28 emission sites + per-file throw/errorThrown accounting verified. Build/test/lint green (independently re-run). Init-time observability gap surfaced honestly — fix routed to Sortie 3.5 with user concurrence (defaulted init param). Line-number drift recorded (assembly +117..+220, generate +314, etc.). |
 | 3.5 | COMPLETED | 1/3 | sonnet | 6ec1177 | 3-line patch: defaulted `telemetry:` param on init, `self.telemetry = telemetry` before validateAssembly, telemetry forwarded to validateAssembly. Source-compat (existing `init(recipe:)` callers unchanged). Build/test/lint green per agent + spot-check. |
+| 4 | COMPLETED | 1/3 | sonnet | 43d88e2 | 7 emission sites (4 textEncoder pairs + 1 schedulerConfigured) + 4 sample() calls (all inside guards, lines 797/798/845/846). Scheduler protocol grew `predictionType: String` default — non-DPM schedulers inherit "unknown" (flagged as downstream cleanup, not a blocker). Build/test/lint green (independently re-run). |
 
 ## Active Agents
 
 | Work Unit | Sortie | Sortie State | Attempt | Model | Complexity Score | Task ID | Output File | Dispatched At |
 |-----------|--------|-------------|---------|-------|-----------------|---------|-------------|---------------|
-| swift-tuberia-instrumentation | 4 | DISPATCHED | 1/3 | sonnet | 6 | ace61a365f0187f2f | (transcript — do not read) | 2026-05-12 |
+| swift-tuberia-instrumentation | 5 | DISPATCHED | 1/3 | opus | 13 | ae4b05bc0e14c8ce6 | (transcript — do not read) | 2026-05-12 |
 
 ## Decisions Log
 
