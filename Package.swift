@@ -65,8 +65,11 @@ let package = Package(
     // Pinned to 0.5.x: the 0.6.0 release (2026-05-09) ships generated
     // TokenizersFFI bindings that reference RustBuffer/RustCallStatus/
     // ForeignBytes runtime types missing from the package — CI fails with
-    // "cannot find type 'RustBuffer' in scope". Revisit when upstream
-    // publishes a 0.6.x with a working artifact bundle.
+    // "cannot find type 'RustBuffer' in scope". The 0.6.2 tag ships an
+    // explicit "Temporary fix for Xcode builds" commit (37f999a) the
+    // maintainer flagged as a possible Xcode bug, so 0.6.x is not yet
+    // stable under xcodebuild. Wait for a 0.6.x release without these
+    // Xcode compile issues before bumping.
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
       .upToNextMinor(from: "0.5.0")),
