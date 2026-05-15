@@ -36,25 +36,25 @@ import os.lock
 /// The instance-bound reporter installed via `DiffusionPipeline.setTelemetry(_:)`
 /// always takes priority over this process-wide reporter.
 public enum TuberiaTelemetry {
-    private static let _lock = OSAllocatedUnfairLock<(any TuberiaTelemetryReporter)?>(
-        initialState: nil
-    )
+  private static let _lock = OSAllocatedUnfairLock<(any TuberiaTelemetryReporter)?>(
+    initialState: nil
+  )
 
-    /// Install (or clear) the process-wide telemetry reporter.
-    ///
-    /// Thread-safe — may be called from any thread or actor. Pass `nil` to
-    /// detach the current reporter and restore "no reporter" state.
-    public static func setReporter(_ reporter: (any TuberiaTelemetryReporter)?) {
-        _lock.withLock { $0 = reporter }
-    }
+  /// Install (or clear) the process-wide telemetry reporter.
+  ///
+  /// Thread-safe — may be called from any thread or actor. Pass `nil` to
+  /// detach the current reporter and restore "no reporter" state.
+  public static func setReporter(_ reporter: (any TuberiaTelemetryReporter)?) {
+    _lock.withLock { $0 = reporter }
+  }
 
-    /// The currently installed process-wide reporter, or `nil` if none has been set.
-    ///
-    /// Emission sites call this on every event via `effectiveReporter` (the
-    /// computed property that applies the instance-wins-over-process-wide
-    /// priority rule). Reading this property is wait-free in the uncontended
-    /// steady state.
-    public static var current: (any TuberiaTelemetryReporter)? {
-        _lock.withLock { $0 }
-    }
+  /// The currently installed process-wide reporter, or `nil` if none has been set.
+  ///
+  /// Emission sites call this on every event via `effectiveReporter` (the
+  /// computed property that applies the instance-wins-over-process-wide
+  /// priority rule). Reading this property is wait-free in the uncontended
+  /// steady state.
+  public static var current: (any TuberiaTelemetryReporter)? {
+    _lock.withLock { $0 }
+  }
 }
