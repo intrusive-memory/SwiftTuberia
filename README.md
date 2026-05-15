@@ -81,6 +81,35 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 
 **Priority**: `base_model.model.` prefix stripping must be added to `LoRALoader.parseLoRAKey` before any load path in either downstream package can route through the shared loader for PEFT adapters. See `AGENTS.md` § LoRA Adapter Interoperability for full policy and test requirements.
 
+## Telemetry
+
+Tuberia emits typed `TuberiaTelemetryEvent` events covering 27 cases across the
+full diffusion pipeline — lifecycle, assembly validation, memory gating, weight
+loading, LoRA, text-encoder, scheduler, per-step denoise, CFG cast, backbone,
+decoder, renderer, numerical anomalies, and thrown errors. Hosts subscribe by
+conforming to `TuberiaTelemetryReporter` and installing via
+`TuberiaTelemetry.setReporter(_:)`.
+
+```swift
+import Tuberia
+
+struct MyTelemetryReporter: TuberiaTelemetryReporter {
+    func capture(_ event: TuberiaTelemetryEvent) async {
+        print("[tuberia] \(event)")
+    }
+}
+
+// At process startup:
+TuberiaTelemetry.setReporter(MyTelemetryReporter())
+
+// At shutdown:
+TuberiaTelemetry.setReporter(nil)
+```
+
+For test isolation, `DiffusionPipeline.setTelemetry(_:)` installs a reporter on a
+single pipeline instance; an instance reporter always takes priority over the
+process-wide one.
+
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
