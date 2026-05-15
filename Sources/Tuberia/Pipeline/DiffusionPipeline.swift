@@ -111,32 +111,43 @@ public actor DiffusionPipeline<
 
   // MARK: - Telemetry Seam (OPERATION GLASS PIPES Sortie 2)
 
-  /// Telemetry reporter installed via `setTelemetry(_:)`.
+  /// Instance-bound telemetry reporter installed via `setTelemetry(_:)`.
   ///
-  /// Defaults to `nil` so the pipeline is zero-cost when telemetry is off; the
-  /// emission sites added in later sorties gate every `TuberiaTensorStat.sample`
-  /// behind an `if let telemetry { ... }` guard so the eight MLX reductions per
-  /// stat never execute when this ivar is `nil`. The reporter type uses the
-  /// existential `(any TuberiaTelemetryReporter)?` form required by Swift 6.
-  ///
-  /// All emission sites are inside actor-isolated methods, so reading this
-  /// ivar requires no further synchronization.
+  /// Defaults to `nil`. Emission sites read through the `telemetry` computed
+  /// property (below) which applies the priority rule:
+  ///   instance reporter wins → falls back to `TuberiaTelemetry.current`
   ///
   /// Declared `private` per §4.1; the `setTelemetry(_:)` public surface lives
   /// in `DiffusionPipeline+Telemetry.swift` and writes through the
   /// `installTelemetry(_:)` forwarder below (cross-file Swift extensions cannot
   /// reach `private` members directly).
-  private var telemetry: (any TuberiaTelemetryReporter)? = nil
+  private var _instanceReporter: (any TuberiaTelemetryReporter)? = nil
 
-  /// Internal writer for the `telemetry` ivar. Called by the public
+  /// Effective telemetry reporter for this pipeline instance.
+  ///
+  /// Returns the instance-bound reporter when one is installed, otherwise falls
+  /// back to `TuberiaTelemetry.current` (the process-wide reporter). This
+  /// property is the single point that enforces the "instance wins" priority
+  /// rule — all emission sites use `if let telemetry { ... }` where `telemetry`
+  /// refers to this computed property.
+  ///
+  /// Zero-cost-when-off semantics are preserved: if both the instance reporter
+  /// and the process-wide reporter are `nil`, this returns `nil` and every
+  /// `if let telemetry { ... }` guard short-circuits before any
+  /// `TuberiaTensorStat.sample(...)` call runs.
+  var telemetry: (any TuberiaTelemetryReporter)? {
+    _instanceReporter ?? TuberiaTelemetry.current
+  }
+
+  /// Internal writer for the instance reporter ivar. Called by the public
   /// `setTelemetry(_:)` extension in `DiffusionPipeline+Telemetry.swift`.
   ///
   /// This indirection exists only because Swift `private` does not cross file
-  /// boundaries: the extension file cannot assign to `self.telemetry` directly.
-  /// Keeping the ivar `private` (per §4.1) and routing the write through this
-  /// `internal` helper preserves the encapsulation intent.
+  /// boundaries: the extension file cannot assign to `self._instanceReporter`
+  /// directly. Keeping the ivar `private` (per §4.1) and routing the write
+  /// through this `internal` helper preserves the encapsulation intent.
   func installTelemetry(_ reporter: (any TuberiaTelemetryReporter)?) {
-    self.telemetry = reporter
+    self._instanceReporter = reporter
   }
 
   // MARK: - Init
@@ -182,7 +193,12 @@ public actor DiffusionPipeline<
 
     // Install telemetry reporter early so init-time events are observable.
     // (setTelemetry() is still supported for late-binding callers.)
-    self.telemetry = telemetry
+    self._instanceReporter = telemetry
+
+    // Resolve the effective reporter for init-time events: the caller-supplied
+    // instance reporter takes priority; fall back to the process-wide reporter.
+    let effectiveInitTelemetry: (any TuberiaTelemetryReporter)? =
+      telemetry ?? TuberiaTelemetry.current
 
     // Validate shape contracts at assembly time
     try Self.validateAssembly(
@@ -190,16 +206,17 @@ public actor DiffusionPipeline<
       backbone: backbone,
       decoder: decoder,
       supportsImageToImage: recipe.supportsImageToImage,
-      telemetry: telemetry
+      telemetry: effectiveInitTelemetry
     )
 
     // Run recipe's own validation
     try recipe.validate()
 
-    // Emit pipelineConfigured. If a telemetry reporter was passed to init,
-    // the event fires; otherwise this is a no-op (and setTelemetry() can be
-    // used to bind a reporter for events emitted by generate()/loadModels()).
-    if let t = telemetry {
+    // Emit pipelineConfigured. If a telemetry reporter is available (either
+    // instance-bound or process-wide), the event fires; otherwise this is a
+    // no-op (and setTelemetry() can be used to bind a reporter for events
+    // emitted by generate()/loadModels()).
+    if let t = effectiveInitTelemetry {
       let recipeName = String(describing: type(of: recipe))
       let encoderType = String(describing: type(of: encoder))
       let schedulerType = String(describing: type(of: scheduler))
