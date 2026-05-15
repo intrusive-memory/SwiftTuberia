@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.7.0
+**Version**: 0.7.0-dev
 
 ---
 
@@ -246,6 +246,84 @@ Older SD-style adapters sometimes prefix keys with `unet.`. This convention is d
 ### Interop Test Policy
 
 Any new key convention added to `LoRALoader` **must** have a corresponding test in `Tests/TuberiaGPUTests/LoRATests.swift` in the `LoRAKeyConventionTests` suite. The suite uses synthetic `ModuleParameters` — no real adapter files required.
+
+## Telemetry
+
+SwiftTuberia ships a **dual-seam telemetry surface** that lets hosts observe every
+boundary event in the diffusion pipeline without coupling to internal types. The
+surface has four parts: `TuberiaTelemetryEvent` (typed event enum, 27 cases),
+`TuberiaTelemetryReporter` (Sendable async-capture protocol), an instance-bound
+seam on `DiffusionPipeline` for test isolation, and a process-wide seam via
+`TuberiaTelemetry` for CLI hosts that can't reach pipeline instances directly. A
+contributor would touch this surface to add a new observable operation, to add an
+adapter in a downstream CLI, or to extend the test matrix for the dual-seam
+priority rules.
+
+### Subscribing as a host (process-wide)
+
+```swift
+// At CLI / process startup:
+TuberiaTelemetry.setReporter(myAdapter)
+
+// At shutdown:
+TuberiaTelemetry.setReporter(nil)
+```
+
+`TuberiaTelemetry.setReporter(_:)` is thread-safe (backed by
+`OSAllocatedUnfairLock`). All current and future `DiffusionPipeline` instances
+emit to this reporter whenever no instance-bound reporter is installed.
+
+### Per-instance subscription (test isolation)
+
+```swift
+let pipeline = DiffusionPipeline(recipe: recipe)
+pipeline.setTelemetry(myMockReporter)  // instance wins over process-wide
+// … run assertions …
+pipeline.setTelemetry(nil)             // detach; process-wide reporter (if any) resumes
+```
+
+Instance reporter always takes priority. Tests that install a mock via
+`setTelemetry(_:)` are not polluted by an ambient process-wide reporter installed
+by the test harness or a sibling test.
+
+### Adding a new event case
+
+1. **Add the case** to `TuberiaTelemetryEvent` in
+   `Sources/Tuberia/Telemetry/TuberiaTelemetryEvent.swift`. All associated-value
+   types must be `Sendable`. Do not add a `runID` field — that belongs at the
+   host/sink envelope layer, not on the event itself.
+2. **Emit it** at exactly one canonical call site via
+   `await self.telemetry?.capture(.yourNewEvent(...))` (using `telemetry`, the
+   computed property that applies the instance-wins-over-process-wide rule).
+   Never call `_instanceReporter?.capture(...)` or `TuberiaTelemetry.current?.capture(...)`
+   directly.
+3. **Update the host adapter** (`TuberiaTelemetryAdapter` in SwiftVinetas) — it
+   switches exhaustively over `TuberiaTelemetryEvent`. Adding a case without
+   updating the adapter causes a compile error in the host; this is intentional.
+4. **Add tests** in `Tests/TuberiaTests/` asserting the new case fires for the
+   instance-bound seam and the process-wide seam. Tear down with
+   `TuberiaTelemetry.setReporter(nil)` in `tearDown` to prevent cross-test leakage.
+
+### When to add a new event
+
+- **Single canonical emission site.** Each case fires in exactly one place in source.
+  Multiple emission sites for the same logical event are a sign the event should be
+  split or the call sites should be refactored.
+- **All payload types must be `Sendable`.** Wrapping a non-Sendable value in a
+  struct to make it compile is not acceptable — redesign the payload.
+- **Do not add `runID`.** Hosts attach run identifiers in the envelope when
+  serialising; the event enum must remain host-agnostic.
+- **Prefer `start`/`complete` pairs.** For any operation with measurable duration,
+  emit both a `...Start` and `...Complete` case. Single events are appropriate only
+  for point-in-time facts (e.g. `memoryGateChecked`, `componentReadinessChecked`).
+- **Honor hot-path discipline.** Emission sites inside the denoise loop must not
+  trigger synchronous MLX tensor reads (`.toArray()`, scalar extractions) except
+  where documented. `TuberiaTensorStat.sample(...)` is the approved sampling helper;
+  its tensor reads are already accounted for in the ≤1% overhead budget.
+
+For the cross-library dual-seam pattern, see `SwiftVinetas/docs/INSTRUMENTATION_PATTERN.md`.
+
+---
 
 ## Common Agent Tasks
 
