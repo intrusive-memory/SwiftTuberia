@@ -68,22 +68,35 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     let latentW = shape[2]
     let outputH = latentH * 8
     let outputW = latentW * 8
-    let pixelData: MLXArray
+    let rawPixels: MLXArray
     if let loadedModel = model {
       do {
-        pixelData = try withError { loadedModel(scaledLatents) }
+        rawPixels = try withError { loadedModel(scaledLatents) }
       } catch {
         throw PipelineError.decodingFailed(
           reason: "SDXL VAE forward pass failed: \(error.localizedDescription)"
         )
       }
     } else {
-      pixelData = placeholderForwardPass(
+      rawPixels = placeholderForwardPass(
         scaledLatents, outputShape: [batchSize, outputH, outputW, 3])
     }
 
+    // SDXL VAE produces pixels in ~[-1, 1] (Diffusers AutoencoderKL convention).
+    // The downstream Renderer contract is [0, 1]; without this remap the
+    // renderer's clip-to-[0,1] asymmetrically truncates negative values,
+    // crushing blacks and biasing the histogram warm.
+    let pixelData = SDXLVAEDecoder.denormalizePixels(rawPixels)
+
     let metadata = ImageDecoderMetadata(scalingFactor: configuration.scalingFactor)
     return DecodedOutput(data: pixelData, metadata: metadata)
+  }
+
+  /// Converts raw VAE decoder output in ~[-1, 1] to [0, 1] using the canonical
+  /// `(x * 0.5 + 0.5).clamp(0, 1)` remap from diffusers `VaeImageProcessor`.
+  /// Internal so regression tests can exercise the remap arithmetic directly.
+  internal static func denormalizePixels(_ raw: MLXArray) -> MLXArray {
+    MLX.clip(raw * 0.5 + 0.5, min: 0.0, max: 1.0)
   }
 
   // MARK: - WeightedSegment
@@ -307,8 +320,10 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
   // MARK: - Placeholder
 
   /// Placeholder forward pass that produces correctly shaped output.
-  /// Used when the model is not loaded.
+  /// Used when the model is not loaded. Returns 0 in the model's native [-1, 1]
+  /// range; ``denormalizePixels`` maps that to 0.5 (mid-gray) in the final
+  /// [0, 1] output, preserving the documented placeholder contract.
   private func placeholderForwardPass(_ input: MLXArray, outputShape: [Int]) -> MLXArray {
-    MLXArray.zeros(outputShape) + 0.5
+    MLXArray.zeros(outputShape)
   }
 }
