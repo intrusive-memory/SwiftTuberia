@@ -778,3 +778,89 @@ struct SDXLVAEDecoderModelForwardTests {
     #expect(output.ndim == 4)
   }
 }
+
+// MARK: - Pixel Range Regression (Diffusers [-1,1] → [0,1] remap)
+
+/// Regression tests for the PixArt-Sigma color-cast bug investigated 2026-05-16.
+///
+/// The SDXL VAE decoder produces raw pixels in roughly [-1, 1] (Diffusers
+/// `AutoencoderKL` convention). The downstream `ImageRenderer` documents its
+/// input as "float in 0.0-1.0 range" and applies `clip(x, 0, 1) * 255`. Without
+/// the canonical `(x * 0.5 + 0.5).clamp(0, 1)` remap, negative pixel values
+/// get clipped to 0, asymmetrically crushing blacks and biasing the rendered
+/// histogram warm. On the mid-century-modern prompt at seed 42 this produced
+/// 96.4% red+orange pixels and 23.5% crushed blacks.
+///
+/// These tests pin the contract that ``SDXLVAEDecoder.decode`` always emits
+/// pixels in `[0, 1]`, so any future regression — accidentally removing the
+/// remap, swapping multiply/divide, or piping raw VAE output past the
+/// denormalize step — is caught at the unit-test boundary.
+@Suite("SDXLVAEDecoder pixel range — [0, 1] output contract")
+struct SDXLVAEDecoderPixelRangeTests {
+
+  @Test("denormalizePixels maps the canonical Diffusers checkpoints")
+  func denormalizePixelsCanonicalPoints() {
+    let raw = MLXArray([Float(-1.5), -1.0, -0.5, 0.0, 0.5, 1.0, 1.5])
+    let out = SDXLVAEDecoder.denormalizePixels(raw).asArray(Float.self)
+    let expected: [Float] = [0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0]
+    #expect(out.count == expected.count)
+    for (got, want) in zip(out, expected) {
+      #expect(abs(got - want) < 1e-6, "got \(got), expected \(want)")
+    }
+  }
+
+  @Test("denormalizePixels clamps the asymmetric over/undershoot from the trace")
+  func denormalizePixelsBugSignatureValues() {
+    // Values observed in the PixArt-Sigma trace 2026-05-16T041957Z.jsonl:
+    // post-VAE pixel tensor min = -1.1551, max = +1.0649. The renderer's
+    // clip-to-[0,1] alone would clip the -1.155 to 0 and remap the rest
+    // linearly, destroying half the dynamic range. The correct remap brings
+    // both ends safely inside [0, 1].
+    let raw = MLXArray([Float(-1.1551), -0.5, 0.0, 0.5, 1.0649])
+    let out = SDXLVAEDecoder.denormalizePixels(raw).asArray(Float.self)
+    for value in out {
+      #expect(value >= 0.0 && value <= 1.0, "\(value) outside [0, 1]")
+    }
+    // The bright-end overshoot clamps to exactly 1.0 (not >1.0); the dark-end
+    // undershoot clamps to exactly 0.0 (not <0.0).
+    #expect(out.first! == 0.0)
+    #expect(out.last! == 1.0)
+    // Mid-range value 0.0 must round-trip to 0.5 (mid-gray).
+    #expect(abs(out[2] - 0.5) < 1e-6)
+  }
+
+  @Test("decode() output is always inside [0, 1] for the placeholder path")
+  func decodeOutputInRangeUnloaded() throws {
+    // The placeholder model is intentionally used here so the test stays a
+    // pure-CPU unit test with no GPU/weight dependency. It still exercises
+    // the full denormalizePixels code path.
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    let latents = MLXArray.zeros([1, 4, 4, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+    let values = output.data.asArray(Float.self)
+    let minValue = values.min() ?? 0.0
+    let maxValue = values.max() ?? 0.0
+    #expect(
+      minValue >= 0.0 && maxValue <= 1.0,
+      "decode() must emit pixels in [0, 1], got [\(minValue), \(maxValue)]")
+  }
+
+  @Test("decode() output is always inside [0, 1] even when the model emits out-of-range")
+  func decodeOutputInRangeLoaded() throws {
+    // The synthetic-weights forward pass emits real (and often out-of-range)
+    // values. Even so, the wrapper must denormalize so the renderer's [0, 1]
+    // contract holds.
+    let decoder = try SDXLVAEDecoder(configuration: SDXLVAEDecoderConfiguration())
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+    let values = output.data.asArray(Float.self)
+    let minValue = values.min() ?? 0.0
+    let maxValue = values.max() ?? 0.0
+    #expect(
+      minValue >= 0.0 && maxValue <= 1.0,
+      "decode() must clamp to [0, 1] regardless of raw model output, got [\(minValue), \(maxValue)]"
+    )
+  }
+}
