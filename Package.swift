@@ -61,7 +61,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.13.1"),
+      from: "0.14.0"),
     // Pinned to 0.5.x: the 0.6.0 release (2026-05-09) ships generated
     // TokenizersFFI bindings that reference RustBuffer/RustCallStatus/
     // ForeignBytes runtime types missing from the package — CI fails with
