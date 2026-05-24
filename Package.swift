@@ -21,7 +21,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.31.3")),
     .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.14.0")),
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.16.0")),
     // Pinned to 0.5.x: the 0.6.0 release (2026-05-09) ships generated
     // TokenizersFFI bindings that reference RustBuffer/RustCallStatus/
     // ForeignBytes runtime types missing from the package — CI fails with
