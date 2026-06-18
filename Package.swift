@@ -62,17 +62,12 @@ let package = Package(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
       from: "0.16.0"),
-    // Pinned to 0.5.x: the 0.6.0 release (2026-05-09) ships generated
-    // TokenizersFFI bindings that reference RustBuffer/RustCallStatus/
-    // ForeignBytes runtime types missing from the package — CI fails with
-    // "cannot find type 'RustBuffer' in scope". The 0.6.2 tag ships an
-    // explicit "Temporary fix for Xcode builds" commit (37f999a) the
-    // maintainer flagged as a possible Xcode bug, so 0.6.x is not yet
-    // stable under xcodebuild. Wait for a 0.6.x release without these
-    // Xcode compile issues before bumping.
+    // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
+    // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild
+    // (the old RustBuffer/module-map blocker is resolved).
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.5.0")),
+      .upToNextMinor(from: "0.7.1")),
   ],
   targets: [
     .target(
