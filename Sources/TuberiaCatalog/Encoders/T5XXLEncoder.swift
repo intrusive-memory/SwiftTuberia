@@ -131,7 +131,11 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   /// - If the text is empty, a single EOS/pad token is produced
   private func tokenize(text: String, seqLen: Int) -> ([Int32], Int) {
     if let tok = tokenizer {
-      return tokenizeWithRealTokenizer(tok, text: text, seqLen: seqLen)
+      do {
+        return try tokenizeWithRealTokenizer(tok, text: text, seqLen: seqLen)
+      } catch {
+        return placeholderTokenize(text: text, seqLen: seqLen)
+      }
     } else {
       return placeholderTokenize(text: text, seqLen: seqLen)
     }
@@ -142,7 +146,7 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     _ tok: any Tokenizer,
     text: String,
     seqLen: Int
-  ) -> ([Int32], Int) {
+  ) throws -> ([Int32], Int) {
     // Handle empty string: produce a single pad token.
     if text.isEmpty {
       var ids = [Int32](repeating: 0, count: seqLen)
@@ -151,7 +155,7 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     }
 
     // Encode the text to token IDs.
-    let rawIds = tok.encode(text: text)
+    let rawIds = try tok.encode(text: text)
 
     // Clamp to maxSequenceLength (truncation).
     let truncated = Array(rawIds.prefix(seqLen))
