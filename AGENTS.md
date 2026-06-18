@@ -2,11 +2,20 @@
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.7.4-dev
+**Version**: 0.7.5
 
 ---
 
 ## Recent Changes
+
+### v0.7.5 — swift-tokenizers 0.5.x → 0.7.1 migration + SwiftAcervo floor bump
+
+Patch release that unblocks the real tokenizer path under xcodebuild and refreshes dependency floors.
+
+- **swift-tokenizers migration**: `.upToNextMinor(from: "0.5.0")` → `.upToNextMinor(from: "0.7.1")`. 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact bundle", so the UniFFI artifactbundle now links cleanly under xcodebuild (the old RustBuffer/module-map blocker is resolved).
+- **Throwing Tokenizer API adoption** (typed-throwing since 0.6.0): `T5XXLEncoder.tokenizeWithRealTokenizer(_:text:seqLen:)` is now `throws` and `try`s `tok.encode(text:)`; `tokenize(text:seqLen:)` wraps the real-tokenizer path in `do/catch` and falls back to `placeholderTokenize(...)` on error, preserving the existing tokenizer-failure → placeholder fallback design. Public `encode(_:)` / `tokenize(...)` signatures unchanged.
+- **SwiftAcervo floor bump**: `0.16.0` → `0.19.2` (latest published release — retains `.upToNextMajor`).
+- **CI**: `actions/checkout` bumped `v6` → `v7` across all workflows.
 
 ### v0.7.0 — Telemetry instrumentation (GLASS PIPES) + SwiftAcervo floor bump
 
