@@ -418,24 +418,33 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
   /// Tiled decode: bounds the activation transient to roughly one tile
   /// regardless of output resolution (#45). The latent is split into spatial
   /// tiles, each decoded through the full VAE with a `latentOverlap` halo, and
-  /// the central (non-halo) pixel region of each tile is hard-cropped and
-  /// written into the output canvas.
+  /// the decoded tiles are recombined with **feathered weighted overlap-add**:
+  /// each tile contributes a per-pixel weight that tapers toward 0 across its
+  /// haloed edges (the edges shared with a neighbor) and is ~1 in its interior,
+  /// and the canvas is normalized by the accumulated weight (`acc / wsum`).
+  ///
+  /// This is the same overlap-and-blend strategy diffusers' `enable_vae_tiling`
+  /// and ComfyUI's tiled VAE use. The VAE mid-block self-attention is **global**
+  /// over the bottleneck, so each tile attends only over its own extent and can
+  /// drift tile-to-tile by a low-frequency amount. A *hard crop* turns that drift
+  /// into a visible seam; the feathered blend spreads it across the overlap band
+  /// so the transition is gradient-free. The overlap-add is accumulated in
+  /// float32 (then cast back to the input dtype) so fp16 accumulation error does
+  /// not reintroduce banding.
   ///
   /// - Parameters:
   ///   - x: scaled latent `[B, H, W, C]` (post-scale, already in decode dtype).
-  ///   - latentTile: tile edge in *latent* pixels (output stride = `latentTile * 8`).
+  ///   - latentTile: interior tile edge in *latent* pixels (stride = `latentTile`,
+  ///     output stride = `latentTile * 8`).
   ///   - latentOverlap: halo in *latent* pixels added on each side before
-  ///     decoding and cropped off after, to suppress edge artifacts.
+  ///     decoding; the feather ramp spans this halo so adjacent tiles blend.
   /// - Returns: pixel tensor `[B, H*8, W*8, 3]`.
   ///
-  /// - Important: This path is experimental and behavior-preserving only when
-  ///   *not* used (it is opt-in via `SDXLVAEDecoderConfiguration.decodeTileLatentSize`).
-  ///   The VAE mid-block self-attention is **global** over the bottleneck, so a
-  ///   tile attends only over its own spatial extent. With small tiles this can
-  ///   produce tile-to-tile low-frequency tone shifts and visible seams that a
-  ///   hard crop does not hide. Validate full-frame-vs-tiled parity (and inspect
-  ///   the seam bands on a high-frequency image) before enabling it for any
-  ///   production resolution. Feathered seam blending is NOT yet implemented.
+  /// - Note: Opt-in via `SDXLVAEDecoderConfiguration.decodeTileLatentSize`. When
+  ///   the latent already fits in one tile this returns the single-pass result
+  ///   bit-for-bit (no overlap, no blend), so the default (tiling off) path is
+  ///   unchanged. `latentOverlap` must be > 0 for adjacent tiles to blend; with
+  ///   0 overlap this degrades to a hard-edged stitch.
   func decodeTiled(_ x: MLXArray, latentTile: Int, latentOverlap: Int) -> MLXArray {
     let scale = 8
     let b = x.dim(0)
@@ -450,7 +459,11 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
       return self.callAsFunction(x)
     }
 
-    var output = MLXArray.zeros([b, outH, outW, 3], dtype: x.dtype)
+    // Weighted overlap-add accumulators (float32 for blend precision).
+    var acc = MLXArray.zeros([b, outH, outW, 3], dtype: .float32)
+    var wsum = MLXArray.zeros([1, outH, outW, 1], dtype: .float32)
+
+    let overlapPx = latentOverlap * scale
 
     var ly = 0
     while ly < h {
@@ -463,35 +476,75 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
         let x1 = min(lx + latentTile + latentOverlap, w)
 
         let tile = x[0..., y0..<y1, x0..<x1, 0...]
-        var decoded = self.callAsFunction(tile)  // [B, (y1-y0)*8, (x1-x0)*8, 3]
+        let decoded = self.callAsFunction(tile).asType(.float32)  // [B, th*8, tw*8, 3]
         eval(decoded)
 
-        // Interior (non-halo) region of this tile, in *latent* coordinates.
-        let iy0 = ly
-        let ix0 = lx
-        let iy1 = min(ly + latentTile, h)
-        let ix1 = min(lx + latentTile, w)
+        // Pixel extent of this decoded (haloed) tile on the full canvas.
+        let py0 = y0 * scale
+        let px0 = x0 * scale
+        let py1 = y1 * scale
+        let px1 = x1 * scale
+        let tileH = py1 - py0
+        let tileW = px1 - px0
 
-        // Where the interior sits inside the decoded (haloed) tile, in pixels.
-        let cropY0 = (iy0 - y0) * scale
-        let cropX0 = (ix0 - x0) * scale
-        let cropY1 = (iy1 - y0) * scale
-        let cropX1 = (ix1 - x0) * scale
-        let interior = decoded[0..., cropY0..<cropY1, cropX0..<cropX1, 0...]
+        // Feather ramp only on sides that actually abut a neighbor tile (an
+        // interior halo). Canvas-boundary sides get full weight so edge pixels
+        // are not under-counted. `y0 > 0` ⇒ there is a tile above, etc.
+        let mY = Self.featherWeights(
+          length: tileH,
+          rampHead: y0 > 0 ? overlapPx : 0,
+          rampTail: y1 < h ? overlapPx : 0)
+        let mX = Self.featherWeights(
+          length: tileW,
+          rampHead: x0 > 0 ? overlapPx : 0,
+          rampTail: x1 < w ? overlapPx : 0)
+        // Separable mask [1, tileH, tileW, 1] — broadcasts over batch + channels.
+        let mask = (mY.reshaped([tileH, 1]) * mX.reshaped([1, tileW]))
+          .reshaped([1, tileH, tileW, 1])
 
-        // Destination in the full-resolution output canvas, in pixels.
-        let dY0 = iy0 * scale
-        let dX0 = ix0 * scale
-        let dY1 = iy1 * scale
-        let dX1 = ix1 * scale
-        output[0..., dY0..<dY1, dX0..<dX1, 0...] = interior
-        eval(output)
+        acc[0..., py0..<py1, px0..<px1, 0...] =
+          acc[0..., py0..<py1, px0..<px1, 0...] + decoded * mask
+        wsum[0..., py0..<py1, px0..<px1, 0...] =
+          wsum[0..., py0..<py1, px0..<px1, 0...] + mask
+        eval(acc, wsum)
 
         lx += latentTile
       }
       ly += latentTile
     }
 
-    return output
+    // Normalize the weighted sum. wsum is strictly > 0 everywhere (every pixel is
+    // covered by at least one tile whose interior weight is 1); clamp guards float
+    // underflow in the ramp tails.
+    let result = (acc / MLX.maximum(wsum, MLXArray(Float(1e-6)))).asType(x.dtype)
+    eval(result)
+    return result
+  }
+
+  /// Builds a 1-D feather weight vector of `length` pixels: a linear ramp
+  /// `0 → 1` over the first `rampHead` pixels, `1 → 0` over the last `rampTail`
+  /// pixels, and `1` in between. A ramp width of `0` means that side is flat
+  /// (full weight) — used for canvas-boundary edges that have no neighbor to
+  /// blend with. Ramps are capped at half the length so head/tail never cross.
+  static func featherWeights(length: Int, rampHead: Int, rampTail: Int) -> MLXArray {
+    var w = [Float](repeating: 1.0, count: max(length, 0))
+    if length <= 0 { return MLXArray(w) }
+
+    let head = min(rampHead, length / 2)
+    let tail = min(rampTail, length / 2)
+
+    if head > 0 {
+      for i in 0..<head {
+        w[i] = Float(i + 1) / Float(head + 1)
+      }
+    }
+    if tail > 0 {
+      for i in 0..<tail {
+        let v = Float(i + 1) / Float(tail + 1)
+        let idx = length - 1 - i
+        w[idx] = Swift.min(w[idx], v)
+      }
+    }
+    return MLXArray(w)
   }
 }
