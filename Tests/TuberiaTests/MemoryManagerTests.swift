@@ -107,4 +107,17 @@ struct MemoryManagerTests {
     let manager = MemoryManager.shared
     await manager.clearGPUCache()
   }
+
+  // MARK: - Resident Footprint
+
+  #if canImport(Darwin)
+    @Test("residentFootprint returns a positive byte count on Darwin")
+    func residentFootprintPositive() async throws {
+      let manager = MemoryManager.shared
+      let footprint = await manager.residentFootprint
+      // task_info(TASK_VM_INFO) is expected to succeed in-process; a running
+      // process always has a non-zero phys_footprint.
+      #expect(footprint > 0)
+    }
+  #endif
 }

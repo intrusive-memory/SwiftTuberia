@@ -52,7 +52,16 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     }
 
     // Apply internal scaling: latents * (1.0 / scalingFactor)
-    let scaledLatents = latents * (1.0 / configuration.scalingFactor)
+    // Down-cast to the configured decode dtype (fp16 by default). The denoise
+    // loop leaves `latents` in float32 (scheduler math), but the VAE weights are
+    // fp16 and the final output is clipped to 8-bit in ImageRenderer, so a
+    // float32 decode wastes ~2× the activation memory for precision that is
+    // discarded anyway (#45). The cast is gated by `configuration.decodeDType`
+    // so it can be reverted to `.float32` (or switched to `.bfloat16`) without
+    // touching call sites. The scalar scale is done in the input's dtype first,
+    // then cast, so the materialized input handed to the model is already fp16.
+    let scaledLatents =
+      (latents * (1.0 / configuration.scalingFactor)).asType(configuration.decodeDType)
 
     // Force evaluation before the VAE forward pass. The denoising loop calls eval(latents)
     // after each step, but that evaluation may leave the scaledLatents lazy. Evaluating
@@ -71,7 +80,23 @@ public final class SDXLVAEDecoder: Decoder, @unchecked Sendable {
     let rawPixels: MLXArray
     if let loadedModel = model {
       do {
-        rawPixels = try withError { loadedModel(scaledLatents) }
+        rawPixels = try withError {
+          // Use the tiled decode path only when a tile size is configured AND
+          // the latent is actually larger than the tile in either spatial
+          // dimension. Otherwise fall through to the original single-pass body,
+          // keeping default behavior bit-for-bit unchanged.
+          if let tile = configuration.decodeTileLatentSize,
+            tile > 0,
+            latentH > tile || latentW > tile
+          {
+            return loadedModel.decodeTiled(
+              scaledLatents,
+              latentTile: tile,
+              latentOverlap: configuration.decodeTileLatentOverlap
+            )
+          }
+          return loadedModel(scaledLatents)
+        }
       } catch {
         throw PipelineError.decodingFailed(
           reason: "SDXL VAE forward pass failed: \(error.localizedDescription)"

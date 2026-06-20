@@ -1311,6 +1311,15 @@ public actor DiffusionPipeline<
         }
       }
 
+      // Drain MLX's GPU buffer cache before the VAE decode. The denoise loop
+      // eval()s `latents` each step so per-step DiT activations leave scope,
+      // but MLX retains the freed buffers in its allocator cache. Without this
+      // flush the decode transient stacks on top of the pooled denoise buffers
+      // instead of reusing that freed space (#45). `latents` is already
+      // materialized by the loop's final eval(), so clearing the cache cannot
+      // discard live work.
+      await MemoryManager.shared.clearGPUCache()
+
       // --- Step 5: Decode latents ---
       progress(.decoding)
       let decoderScalingFactor = decoder.scalingFactor
@@ -1327,6 +1336,11 @@ public actor DiffusionPipeline<
       }
       let decodedOutput: DecodedOutput
       let decoderStart = Date()
+      // Sample resident footprint immediately before the decode so the decode
+      // transient (#45) shows up as the before→after delta on the completion
+      // event. Behind the telemetry guard to stay zero-cost when off.
+      let residentBytesBeforeDecode: UInt64 =
+        telemetry != nil ? await MemoryManager.shared.residentFootprint : 0
       do {
         decodedOutput = try decoder.decode(latents)
       } catch {
@@ -1341,11 +1355,14 @@ public actor DiffusionPipeline<
         throw PipelineError.decodingFailed(reason: String(describing: error))
       }
       if let telemetry {
+        let residentBytesAfterDecode = await MemoryManager.shared.residentFootprint
         let outputStat = TuberiaTensorStat.sample(decodedOutput.data)
         await telemetry.capture(
           .decoderDecodeComplete(
             outputStat: outputStat,
-            durationSeconds: Date().timeIntervalSince(decoderStart)
+            durationSeconds: Date().timeIntervalSince(decoderStart),
+            residentBytesBefore: residentBytesBeforeDecode,
+            residentBytesAfter: residentBytesAfterDecode
           ))
         await emitAnomalyIfPresent(
           reporter: telemetry,
