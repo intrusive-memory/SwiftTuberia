@@ -219,16 +219,15 @@ final class VAEMidBlock: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
-    print("[VAEMidBlock] entry x.shape=\(x.shape)")
+    // The interleaved eval()s are load-bearing: they materialize each stage so a
+    // shapeless (ndim=0) tensor cannot propagate into the next GroupNorm under
+    // memory pressure. Do not remove them.
     var h = resnets[0](x)
     eval(h)
-    print("[VAEMidBlock] after resnet[0] h.shape=\(h.shape)")
     h = attention(h)
     eval(h)
-    print("[VAEMidBlock] after attention h.shape=\(h.shape)")
     h = resnets[1](h)
     eval(h)
-    print("[VAEMidBlock] after resnet[1] h.shape=\(h.shape)")
     return h
   }
 }
@@ -259,17 +258,15 @@ final class VAEUpBlock: MLXNN.Module {
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
-    print("[VAEUpBlock] entry x.shape=\(x.shape)")
+    // The interleaved eval()s are load-bearing — they keep a shapeless tensor
+    // from reaching the next block under memory pressure. Keep them.
     var h = x
-    for (i, resnet) in resnets.enumerated() {
+    for resnet in resnets {
       h = resnet(h)
       eval(h)
-      print("[VAEUpBlock] after resnet[\(i)] h.shape=\(h.shape)")
     }
     if let up = upsample {
-      print("[VAEUpBlock] pre-upsample h.shape=\(h.shape) h.ndim=\(h.ndim)")
       eval(h)
-      print("[VAEUpBlock] post-eval h.shape=\(h.shape) h.ndim=\(h.ndim)")
       h = up(h)
     }
     return h
@@ -391,25 +388,23 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
   /// - Parameter x: Latent tensor [B, H/8, W/8, 4] (already scaled by 1/scalingFactor)
   /// - Returns: Pixel tensor [B, H, W, 3]
   func callAsFunction(_ x: MLXArray) -> MLXArray {
-    print("[VAEModel] input x.shape=\(x.shape)")
+    // The interleaved eval()s are load-bearing: they materialize each stage so a
+    // shapeless (ndim=0) tensor cannot propagate forward under memory pressure.
+    // Keep them; only the diagnostic prints were removed (#45).
     // Post-quantization projection (1x1 conv, 4→4)
     var h = postQuantConv(x)
     eval(h)
-    print("[VAEModel] after postQuantConv h.shape=\(h.shape)")
 
     h = convIn(h)
     eval(h)
-    print("[VAEModel] after convIn h.shape=\(h.shape)")
 
     h = midBlock(h)
     eval(h)
-    print("[VAEModel] after midBlock h.shape=\(h.shape)")
 
     // Progressive upsampling through up blocks
-    for (i, upBlock) in upBlocks.enumerated() {
+    for upBlock in upBlocks {
       h = upBlock(h)
       eval(h)
-      print("[VAEModel] after upBlock[\(i)] h.shape=\(h.shape)")
     }
 
     // Final normalization and output projection
@@ -418,5 +413,85 @@ final class SDXLVAEDecoderModel: MLXNN.Module {
     h = convOut(h)
 
     return h
+  }
+
+  /// Tiled decode: bounds the activation transient to roughly one tile
+  /// regardless of output resolution (#45). The latent is split into spatial
+  /// tiles, each decoded through the full VAE with a `latentOverlap` halo, and
+  /// the central (non-halo) pixel region of each tile is hard-cropped and
+  /// written into the output canvas.
+  ///
+  /// - Parameters:
+  ///   - x: scaled latent `[B, H, W, C]` (post-scale, already in decode dtype).
+  ///   - latentTile: tile edge in *latent* pixels (output stride = `latentTile * 8`).
+  ///   - latentOverlap: halo in *latent* pixels added on each side before
+  ///     decoding and cropped off after, to suppress edge artifacts.
+  /// - Returns: pixel tensor `[B, H*8, W*8, 3]`.
+  ///
+  /// - Important: This path is experimental and behavior-preserving only when
+  ///   *not* used (it is opt-in via `SDXLVAEDecoderConfiguration.decodeTileLatentSize`).
+  ///   The VAE mid-block self-attention is **global** over the bottleneck, so a
+  ///   tile attends only over its own spatial extent. With small tiles this can
+  ///   produce tile-to-tile low-frequency tone shifts and visible seams that a
+  ///   hard crop does not hide. Validate full-frame-vs-tiled parity (and inspect
+  ///   the seam bands on a high-frequency image) before enabling it for any
+  ///   production resolution. Feathered seam blending is NOT yet implemented.
+  func decodeTiled(_ x: MLXArray, latentTile: Int, latentOverlap: Int) -> MLXArray {
+    let scale = 8
+    let b = x.dim(0)
+    let h = x.dim(1)
+    let w = x.dim(2)
+    let outH = h * scale
+    let outW = w * scale
+
+    // If the latent already fits in a single tile, decode in one pass — the
+    // tiled and single-pass results are then identical (no seams, no overlap).
+    if h <= latentTile && w <= latentTile {
+      return self.callAsFunction(x)
+    }
+
+    var output = MLXArray.zeros([b, outH, outW, 3], dtype: x.dtype)
+
+    var ly = 0
+    while ly < h {
+      var lx = 0
+      while lx < w {
+        // Haloed latent window, clamped to the latent bounds.
+        let y0 = max(ly - latentOverlap, 0)
+        let x0 = max(lx - latentOverlap, 0)
+        let y1 = min(ly + latentTile + latentOverlap, h)
+        let x1 = min(lx + latentTile + latentOverlap, w)
+
+        let tile = x[0..., y0..<y1, x0..<x1, 0...]
+        var decoded = self.callAsFunction(tile)  // [B, (y1-y0)*8, (x1-x0)*8, 3]
+        eval(decoded)
+
+        // Interior (non-halo) region of this tile, in *latent* coordinates.
+        let iy0 = ly
+        let ix0 = lx
+        let iy1 = min(ly + latentTile, h)
+        let ix1 = min(lx + latentTile, w)
+
+        // Where the interior sits inside the decoded (haloed) tile, in pixels.
+        let cropY0 = (iy0 - y0) * scale
+        let cropX0 = (ix0 - x0) * scale
+        let cropY1 = (iy1 - y0) * scale
+        let cropX1 = (ix1 - x0) * scale
+        let interior = decoded[0..., cropY0..<cropY1, cropX0..<cropX1, 0...]
+
+        // Destination in the full-resolution output canvas, in pixels.
+        let dY0 = iy0 * scale
+        let dX0 = ix0 * scale
+        let dY1 = iy1 * scale
+        let dX1 = ix1 * scale
+        output[0..., dY0..<dY1, dX0..<dX1, 0...] = interior
+        eval(output)
+
+        lx += latentTile
+      }
+      ly += latentTile
+    }
+
+    return output
   }
 }

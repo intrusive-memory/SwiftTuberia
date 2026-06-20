@@ -153,7 +153,18 @@ public enum TuberiaTelemetryEvent: Sendable {
   // MARK: - Decoder handoff
 
   case decoderDecodeStart(latentStat: TuberiaTensorStat, scalingFactor: Float)
-  case decoderDecodeComplete(outputStat: TuberiaTensorStat, durationSeconds: Double)
+  /// Emitted after the VAE decode completes.
+  ///
+  /// `residentBytesBefore` / `residentBytesAfter` sample the process resident
+  /// footprint (`phys_footprint`) immediately before and after the decode call
+  /// so the decode-time memory delta — the #45 transient spike — is observable.
+  /// Both are `0` when the platform cannot sample (`task_info` failure / non-Darwin).
+  case decoderDecodeComplete(
+    outputStat: TuberiaTensorStat,
+    durationSeconds: Double,
+    residentBytesBefore: UInt64,
+    residentBytesAfter: UInt64
+  )
 
   // MARK: - Renderer handoff
 
