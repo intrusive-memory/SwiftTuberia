@@ -124,6 +124,32 @@ public actor MemoryManager {
     loadedComponents.values.reduce(0, +)
   }
 
+  // MARK: - Resident Footprint
+
+  /// Current resident footprint (`phys_footprint`) of this process, in bytes.
+  ///
+  /// This is the number Jetsam / the memory limit actually watches, so it is the
+  /// right signal for "did the decode spike toward the cap?" (#45). Read-only and
+  /// cheap (microseconds). Returns 0 if the `task_info` call fails or on a
+  /// non-Darwin platform.
+  public var residentFootprint: UInt64 {
+    #if canImport(Darwin)
+      var info = task_vm_info_data_t()
+      var count = mach_msg_type_number_t(
+        MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+      )
+      let kr = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+          task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+        }
+      }
+      guard kr == KERN_SUCCESS else { return 0 }
+      return UInt64(info.phys_footprint)
+    #else
+      return 0
+    #endif
+  }
+
   // MARK: - GPU Cache
 
   /// Clear the MLX GPU buffer cache.

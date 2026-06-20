@@ -318,6 +318,69 @@ struct SDXLVAEDecoderApplyWeightsTests {
   }
 }
 
+// MARK: - Configuration Defaults Tests (#45)
+
+@Suite("SDXLVAEDecoderConfiguration Defaults")
+struct SDXLVAEDecoderConfigurationTests {
+
+  @Test("default decodeDType is bf16 (fp16-unstable VAE) and tiling is off")
+  func defaultDecodeConfig() {
+    let config = SDXLVAEDecoderConfiguration()
+    // bf16, not fp16: the real SDXL VAE is force_upcast and overflows fp16 to NaN
+    // (see SDXLVAEDecoderRealWeightsTests). bf16 keeps the 16-bit memory win safely.
+    #expect(config.decodeDType == .bfloat16)
+    #expect(config.decodeTileLatentSize == nil)
+    #expect(config.decodeTileLatentOverlap == 8)
+  }
+
+  @Test("new decode fields round-trip through the initializer")
+  func decodeFieldsRoundTrip() {
+    let config = SDXLVAEDecoderConfiguration(
+      decodeDType: .float32,
+      decodeTileLatentSize: 64,
+      decodeTileLatentOverlap: 16
+    )
+    #expect(config.decodeDType == .float32)
+    #expect(config.decodeTileLatentSize == 64)
+    #expect(config.decodeTileLatentOverlap == 16)
+  }
+}
+
+// MARK: - decode() dtype Tests (#45)
+
+@Suite("SDXLVAEDecoder decode() dtype")
+struct SDXLVAEDecoderDecodeDTypeTests {
+
+  @Test("decode() with fp16 config produces correct shape and finite, in-range output")
+  func decodeFP16ShapeAndRange() throws {
+    let decoder = try SDXLVAEDecoder(
+      configuration: SDXLVAEDecoderConfiguration(decodeDType: .float16))
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    #expect(output.data.shape == [1, 64, 64, 3])
+    let values = output.data.asArray(Float.self)
+    #expect(values.allSatisfy { $0.isFinite })
+    #expect(values.allSatisfy { $0 >= 0.0 && $0 <= 1.0 })
+  }
+
+  @Test("decode() with float32 config still produces correct shape and in-range output")
+  func decodeFloat32ShapeAndRange() throws {
+    let decoder = try SDXLVAEDecoder(
+      configuration: SDXLVAEDecoderConfiguration(decodeDType: .float32))
+    try decoder.apply(weights: makeSyntheticVAEParams())
+
+    let latents = MLXArray.zeros([1, 8, 8, 4]).asType(.float32)
+    let output = try decoder.decode(latents)
+
+    #expect(output.data.shape == [1, 64, 64, 3])
+    let values = output.data.asArray(Float.self)
+    #expect(values.allSatisfy { $0 >= 0.0 && $0 <= 1.0 })
+  }
+}
+
 // MARK: - decode() Shape Tests
 
 @Suite("SDXLVAEDecoder decode() Shape Tests")
@@ -725,6 +788,99 @@ struct SDXLVAEDecoderForwardPassTests {
     let decoder = try SDXLVAEDecoder(configuration: config)
     // scalingFactor property is available via protocol
     #expect(abs(decoder.scalingFactor - 0.13025) < 1e-6)
+  }
+}
+
+// MARK: - Tiled Decode Tests (#45)
+
+@Suite("SDXLVAEDecoderModel Tiled Decode")
+struct SDXLVAEDecoderTiledDecodeTests {
+
+  /// A tile size >= the latent extent decodes in a single pass, so the tiled
+  /// path must equal the full-frame path bit-for-bit.
+  @Test("decodeTiled with tile >= latent equals full-frame decode")
+  func tiledEqualsFullWhenTileCoversLatent() throws {
+    let model = SDXLVAEDecoderModel()
+    model.update(
+      parameters: MLXNN.ModuleParameters.unflattened(makeSyntheticVAEParams().parameters))
+
+    let input = MLXArray.zeros([1, 8, 8, 4])
+    let full = model(input)
+    let tiled = model.decodeTiled(input, latentTile: 16, latentOverlap: 8)
+    eval(full)
+    eval(tiled)
+
+    #expect(tiled.shape == full.shape)
+    let maxDiff = MLX.max(MLX.abs(full - tiled)).item(Float.self)
+    #expect(maxDiff == 0.0, "single-tile tiled decode must be identical to full decode")
+  }
+
+  /// Multi-tile decode produces the correct full-resolution shape. (Numerical
+  /// parity vs. full-frame is a GPU/real-weights concern — see GPU tests —
+  /// because the global mid-block attention makes tiles differ on real models.)
+  @Test("decodeTiled with multiple tiles produces [B, H*8, W*8, 3]")
+  func tiledMultiTileShape() throws {
+    let model = SDXLVAEDecoderModel()
+    model.update(
+      parameters: MLXNN.ModuleParameters.unflattened(makeSyntheticVAEParams().parameters))
+
+    // 16x16 latent with an 8-px tile → 2x2 grid of tiles.
+    let input = MLXArray.zeros([1, 16, 16, 4])
+    let tiled = model.decodeTiled(input, latentTile: 8, latentOverlap: 4)
+    eval(tiled)
+    #expect(tiled.shape == [1, 128, 128, 3])
+  }
+
+  /// With all-zero synthetic weights the model is spatially shift-invariant
+  /// (no attention contribution from zero Q/K/V), so overlapping tiles decode to
+  /// identical values and the feathered weighted overlap-add (`acc / wsum`) must
+  /// reproduce full-frame to within float precision. This guards the tile
+  /// geometry, the feather mask, and the normalization arithmetic. (Tolerance,
+  /// not bit-exact, because the blend is a weighted average normalized by the
+  /// accumulated weight rather than a hard crop.)
+  @Test("decodeTiled multi-tile matches full-frame on shift-invariant synthetic model")
+  func tiledMultiTileMatchesFullSynthetic() throws {
+    let model = SDXLVAEDecoderModel()
+    model.update(
+      parameters: MLXNN.ModuleParameters.unflattened(makeSyntheticVAEParams().parameters))
+
+    let input = MLXArray.zeros([1, 16, 16, 4])
+    let full = model(input)
+    let tiled = model.decodeTiled(input, latentTile: 8, latentOverlap: 4)
+    eval(full)
+    eval(tiled)
+
+    #expect(tiled.shape == full.shape)
+    let maxDiff = MLX.max(MLX.abs(full - tiled)).item(Float.self)
+    #expect(
+      maxDiff < 1e-4,
+      "feathered overlap-add must reproduce full-frame within tolerance (got \(maxDiff))")
+  }
+
+  /// `featherWeights` builds the 1-D blend ramp: `0→1` over `rampHead`, flat `1`
+  /// in the middle, `1→0` over `rampTail`. A zero-width ramp means full weight on
+  /// that side (a canvas-boundary edge with no neighbor to blend with).
+  @Test("featherWeights ramps up/down and stays flat with no neighbor")
+  func featherWeightsShape() {
+    // Both sides ramp (interior tile): ends are below the flat middle.
+    let both = SDXLVAEDecoderModel.featherWeights(length: 16, rampHead: 4, rampTail: 4)
+      .asArray(Float.self)
+    #expect(both.count == 16)
+    #expect(both.first! < both[8])  // head ramps up toward the middle
+    #expect(both.last! < both[8])  // tail ramps down from the middle
+    #expect(both[8] == 1.0)  // flat interior at full weight
+    #expect(both.allSatisfy { $0 > 0.0 && $0 <= 1.0 })
+
+    // No neighbor on either side (canvas-corner tile): all weights are 1.
+    let none = SDXLVAEDecoderModel.featherWeights(length: 16, rampHead: 0, rampTail: 0)
+      .asArray(Float.self)
+    #expect(none.allSatisfy { $0 == 1.0 })
+
+    // Head-only ramp: ascends from the start, flat for the remainder.
+    let head = SDXLVAEDecoderModel.featherWeights(length: 16, rampHead: 4, rampTail: 0)
+      .asArray(Float.self)
+    #expect(head.first! < 1.0)
+    #expect(head.last! == 1.0)
   }
 }
 
