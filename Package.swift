@@ -19,7 +19,11 @@ let package = Package(
     ),
   ],
   dependencies: [
-    .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.31.3")),
+    // Pinned to exactly 0.31.3. mlx-swift 0.31.4 carries upstream #410
+    // (evalLock-during-toString deadlock / EINVAL fatal) that breaks
+    // generation downstream. A floor would still resolve 0.31.4 as the highest
+    // in range, so pin exactly until an upstream release fixes #410.
+    .package(url: "https://github.com/ml-explore/mlx-swift", .exact("0.31.3")),
     .package(
       url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.19.2")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
