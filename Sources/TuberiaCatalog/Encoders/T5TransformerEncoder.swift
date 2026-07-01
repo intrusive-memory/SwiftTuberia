@@ -3,6 +3,48 @@ import Foundation
 import MLXNN
 import Tuberia
 
+// MARK: - Quantized projection helper
+
+/// int4 quantization parameters used throughout the T5-XXL encoder.
+///
+/// The T5-XXL weights ship int4-quantized (`groupSize = 64`, `bits = 4`) and are
+/// kept **packed in memory** (never dequantized to fp16). Projection matmuls use
+/// `quantizedMM(...)` directly against the packed `uint32` weight.
+private enum T5Quant {
+  static let groupSize = 64
+  static let bits = 4
+}
+
+/// Perform a linear projection `x @ w.T` for a T5 weight matrix.
+///
+/// When `weight` is a packed int4 tensor (`dtype == .uint32`), this uses MLX's
+/// `quantizedMM` with `transpose: true` — mathematically identical to
+/// `matmul(x, dequantized(weight).transposed(1, 0))` but without ever
+/// materializing the ~5× larger fp16 weight. The packed weight is stored exactly
+/// as it appears in the safetensors (`[outDim, inDim / 8]`), so no transpose of
+/// the stored tensor is needed.
+///
+/// When `weight` is a plain float tensor (e.g. small test fixtures, or
+/// non-quantized checkpoints), it falls back to a plain `matmul(x, weight)`,
+/// where `weight` is expected in `[inDim, outDim]` layout as before.
+@inline(__always)
+private func t5Project(
+  _ x: MLXArray,
+  weight: MLXArray,
+  scales: MLXArray,
+  biases: MLXArray
+) -> MLXArray {
+  if weight.dtype == .uint32 {
+    return quantizedMM(
+      x, weight,
+      scales: scales, biases: biases,
+      transpose: true,
+      groupSize: T5Quant.groupSize, bits: T5Quant.bits
+    )
+  }
+  return MLX.matmul(x, weight)
+}
+
 // MARK: - T5RMSNorm
 
 /// RMS layer normalization as used in T5.
@@ -53,11 +95,25 @@ public final class T5RMSNorm: MLXNN.Module {
 /// The `relative_attention_bias` embedding is only stored on layer 0's T5Attention
 /// and passed in at call time via the `positionBias` parameter.
 public final class T5Attention: MLXNN.Module {
-  // Projection matrices [hidden_dim, hidden_dim], no bias
+  // Projection matrices, no bias. When int4-quantized, these hold the packed
+  // `uint32` weight `[outDim, inDim / 8]` and the companion `*_scales` / `*_biases`
+  // hold the per-group fp16 dequantization params. When non-quantized (tests),
+  // they hold a plain `[inDim, outDim]` float matrix and the scales/biases are unused.
   var q: MLXArray
   var k: MLXArray
   var v: MLXArray
   var o: MLXArray
+
+  // int4 quantization sidecars, one pair per projection. Zero-initialized;
+  // populated from the checkpoint's `.scales` / `.biases` tensors on load.
+  var q_scales: MLXArray
+  var q_biases: MLXArray
+  var k_scales: MLXArray
+  var k_biases: MLXArray
+  var v_scales: MLXArray
+  var v_biases: MLXArray
+  var o_scales: MLXArray
+  var o_biases: MLXArray
 
   private let numHeads: Int
   private let headDim: Int
@@ -80,6 +136,15 @@ public final class T5Attention: MLXNN.Module {
     self.k = MLXArray.zeros([hiddenDim, hiddenDim])
     self.v = MLXArray.zeros([hiddenDim, hiddenDim])
     self.o = MLXArray.zeros([hiddenDim, hiddenDim])
+    // Quantization sidecars — zero-init, replaced on int4 weight load.
+    self.q_scales = MLXArray.zeros([1])
+    self.q_biases = MLXArray.zeros([1])
+    self.k_scales = MLXArray.zeros([1])
+    self.k_biases = MLXArray.zeros([1])
+    self.v_scales = MLXArray.zeros([1])
+    self.v_biases = MLXArray.zeros([1])
+    self.o_scales = MLXArray.zeros([1])
+    self.o_biases = MLXArray.zeros([1])
     super.init()
   }
 
@@ -100,11 +165,11 @@ public final class T5Attention: MLXNN.Module {
     let batchSize = shape[0]
     let seqLen = shape[1]
 
-    // Project Q, K, V: matmul with weight matrices
-    // x: [B, S, D], weight: [D, D] -> [B, S, D]
-    let qProj = MLX.matmul(x, q)
-    let kProj = MLX.matmul(x, k)
-    let vProj = MLX.matmul(x, v)
+    // Project Q, K, V: x @ W.T with (possibly int4-quantized) weight matrices.
+    // x: [B, S, D] -> [B, S, D]
+    let qProj = t5Project(x, weight: q, scales: q_scales, biases: q_biases)
+    let kProj = t5Project(x, weight: k, scales: k_scales, biases: k_biases)
+    let vProj = t5Project(x, weight: v, scales: v_scales, biases: v_biases)
 
     // Reshape to [B, seq_len, num_heads, head_dim] then transpose to [B, num_heads, seq_len, head_dim]
     let qReshaped = qProj.reshaped([batchSize, seqLen, numHeads, headDim])
@@ -146,7 +211,7 @@ public final class T5Attention: MLXNN.Module {
       .reshaped([batchSize, seqLen, hiddenDim])
 
     // Output projection
-    return MLX.matmul(attnConcat, o)
+    return t5Project(attnConcat, weight: o, scales: o_scales, biases: o_biases)
   }
 }
 
@@ -161,14 +226,30 @@ public final class T5Attention: MLXNN.Module {
 /// - `wi_1` [hidden_dim, ffn_dim]
 /// - `wo`   [ffn_dim, hidden_dim]
 public final class T5GatedFFN: MLXNN.Module {
+  // When int4-quantized these hold the packed `uint32` weight `[outDim, inDim / 8]`;
+  // otherwise a plain `[inDim, outDim]` float matrix (see `t5Project`).
   var wi_0: MLXArray
   var wi_1: MLXArray
   var wo: MLXArray
+
+  // int4 quantization sidecars, one pair per projection.
+  var wi_0_scales: MLXArray
+  var wi_0_biases: MLXArray
+  var wi_1_scales: MLXArray
+  var wi_1_biases: MLXArray
+  var wo_scales: MLXArray
+  var wo_biases: MLXArray
 
   public init(hiddenDim: Int = 4096, ffnDim: Int = 10240) {
     self.wi_0 = MLXArray.zeros([hiddenDim, ffnDim])
     self.wi_1 = MLXArray.zeros([hiddenDim, ffnDim])
     self.wo = MLXArray.zeros([ffnDim, hiddenDim])
+    self.wi_0_scales = MLXArray.zeros([1])
+    self.wi_0_biases = MLXArray.zeros([1])
+    self.wi_1_scales = MLXArray.zeros([1])
+    self.wi_1_biases = MLXArray.zeros([1])
+    self.wo_scales = MLXArray.zeros([1])
+    self.wo_biases = MLXArray.zeros([1])
     super.init()
   }
 
@@ -176,13 +257,13 @@ public final class T5GatedFFN: MLXNN.Module {
     // GeGLU gate: gelu(wi_0(x)) * wi_1(x)
     // MLXNN.gelu uses compile(shapeless: true) which can return a 0D tensor under memory
     // pressure, causing downstream crashes. Use direct gelu_new (tanh approximation) instead.
-    let inner = MLX.matmul(x, wi_0)
+    let inner = t5Project(x, weight: wi_0, scales: wi_0_scales, biases: wi_0_biases)
     let gate =
       inner * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (inner + 0.044715 * inner * inner * inner)))
-    let linear = MLX.matmul(x, wi_1)
+    let linear = t5Project(x, weight: wi_1, scales: wi_1_scales, biases: wi_1_biases)
     let gated = gate * linear
     // Project back to hidden dim
-    return MLX.matmul(gated, wo)
+    return t5Project(gated, weight: wo, scales: wo_scales, biases: wo_biases)
   }
 }
 
