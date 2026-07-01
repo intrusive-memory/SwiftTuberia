@@ -231,11 +231,13 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
   /// For int4-quantized weights, the safetensors contains triplets:
   ///   `<base>.weight` (U32 packed), `<base>.scales` (F16), `<base>.biases` (F16).
   ///
-  /// The sidecar `.scales` and `.biases` keys are mapped to
-  ///   `<mappedBase>.__scales` and `<mappedBase>.__biases`
-  /// so they survive the WeightLoader key filtering and are available in `apply(weights:)`
-  /// for dequantization. These synthetic keys are NOT module parameter paths — they are
-  /// consumed and removed during dequantization in `apply(weights:)`.
+  /// The sidecar `.scales` and `.biases` keys are mapped to the sibling
+  /// module-parameter paths
+  ///   `<mappedBase>_scales` and `<mappedBase>_biases`
+  /// (e.g. `blocks.0.attention.q_scales`), which correspond to the `*_scales` /
+  /// `*_biases` properties on `T5Attention` / `T5GatedFFN`. The packed weight and
+  /// its sidecars are loaded **as-is** (never dequantized) and consumed at
+  /// forward time by `quantizedMM`.
   static func mapKey(_ key: String) -> String? {
     // Skip decoder and language model head keys — encoder-only model
     if key.hasPrefix("decoder.") || key.hasPrefix("lm_head.") {
@@ -243,16 +245,17 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     }
 
     // Handle int4 quantization sidecar keys by stripping the sidecar suffix,
-    // mapping the base key, then re-appending a private sidecar marker.
+    // mapping the base key, then re-appending the sibling `_scales` / `_biases`
+    // parameter-name suffix.
     for sidecar in [".scales", ".biases"] {
       if key.hasSuffix(sidecar) {
         let baseKey = String(key.dropLast(sidecar.count))
         // Map the base key as if it were the .weight key
         let baseAsWeight = baseKey + ".weight"
         if let mappedBase = mapKey(baseAsWeight) {
-          // mappedBase ends in the weight mapped key (e.g. "blocks.0.attention.q")
-          // Store sidecar with a private prefix so apply(weights:) can find them
-          return mappedBase + ".__" + String(sidecar.dropFirst(1))  // e.g. "blocks.0.attention.q.__scales"
+          // mappedBase ends in the weight mapped key (e.g. "blocks.0.attention.q").
+          // The sidecar lives at the sibling parameter (e.g. "blocks.0.attention.q_scales").
+          return mappedBase + "_" + String(sidecar.dropFirst(1))  // e.g. "blocks.0.attention.q_scales"
         }
         return nil
       }
@@ -331,63 +334,35 @@ public final class T5XXLEncoder: TextEncoder, TokenizerLoadable, @unchecked Send
     //   <base>.biases  — F16, shape [outDim, numGroups]  (zero-point)
     //
     // The WeightLoader key mapping (mapKey) translates these to:
-    //   <mappedBase>            — the raw U32 packed tensor (mapped from <base>.weight)
-    //   <mappedBase>.__scales   — F16 scales sidecar (private synthetic key)
-    //   <mappedBase>.__biases   — F16 biases sidecar (private synthetic key)
+    //   <mappedBase>          — the raw U32 packed tensor (mapped from <base>.weight)
+    //   <mappedBase>_scales   — F16 scales sidecar (sibling parameter)
+    //   <mappedBase>_biases   — F16 biases sidecar (sibling parameter)
     //
-    // This apply(weights:) function receives the already-mapped keys in weights.parameters.
-    // It must:
-    //  1. Collect .__scales and .__biases sidecars by base mapped key.
-    //  2. For each weight key that has sidecars (U32 dtype): dequantize and transpose.
-    //  3. Pass non-quantized tensors (layer norms, embeddings) through unchanged.
-    //  4. Strip sidecar keys from the parameter dict before calling model.update().
+    // This apply(weights:) receives the already-mapped keys in weights.parameters.
     //
-    // After dequantization, shape is [outDim, inDim] (PyTorch row-major).
-    // T5TransformerEncoder uses matmul(x, w) directly (not via Linear), requiring
-    // [inDim, outDim] column-major layout — so we TRANSPOSE the dequantized weight.
-
-    // First pass: collect .__scales and .__biases by base mapped key.
-    var scalesMap: [String: MLXArray] = [:]
-    var biasesMap: [String: MLXArray] = [:]
-    for (key, tensor) in weights.parameters {
-      if key.hasSuffix(".__scales") {
-        let base = String(key.dropLast(".__scales".count))
-        scalesMap[base] = tensor
-      } else if key.hasSuffix(".__biases") {
-        let base = String(key.dropLast(".__biases".count))
-        biasesMap[base] = tensor
-      }
-    }
-
-    // Second pass: dequantize + transpose int4 weights, pass others through.
-    // Skip sidecar keys — they're consumed here, not forwarded to model.update().
+    // CRITICAL (int4-in-memory): the packed weight and its scales/biases are loaded
+    // **as-is** and kept resident in quantized form — we deliberately do NOT call
+    // dequantized(...) here. Dequantizing to fp16 inflated the encoder from ~1.2 GB
+    // to ~9.4 GB and OOM'd the iPad. The forward pass (t5Project → quantizedMM,
+    // transpose: true) consumes the packed [outDim, inDim/8] weight directly, so no
+    // transpose of the stored weight is needed either.
+    //
+    // Only special case: relative_position_bias (a non-quantized fp16 tensor) is
+    // transposed to match T5TransformerEncoder's expected [num_heads, num_buckets]
+    // layout, exactly as before.
     var flatMapped: [(String, MLXArray)] = []
     for (mappedKey, tensor) in weights.parameters {
-      if mappedKey.hasSuffix(".__scales") || mappedKey.hasSuffix(".__biases") {
-        continue
-      }
-
       let tensorToStore: MLXArray
-      if tensor.dtype == .uint32,
-        let scales = scalesMap[mappedKey],
-        let biases = biasesMap[mappedKey]
-      {
-        // Dequantize: [outDim, inDim/8] → [outDim, inDim] in float16
-        let floatWeight = dequantized(
-          tensor, scales: scales, biases: biases, groupSize: 64, bits: 4
-        )
-        .asType(.float16)
-        // Transpose to [inDim, outDim] for direct matmul(x, w) in T5 layers.
-        tensorToStore = floatWeight.transposed(1, 0)
-      } else if mappedKey == "relative_position_bias" {
+      if mappedKey == "relative_position_bias" {
         // The safetensors stores this as [num_buckets=32, num_heads=64] (transposed relative
         // to T5TransformerEncoder's expected [num_heads=64, num_buckets=32] layout).
         // Transpose so computeRelativePositionBias() gathers correctly.
         tensorToStore = tensor.transposed(1, 0)
       } else {
+        // Packed int4 weights, scales, biases, layer norms and embeddings all pass
+        // through unchanged.
         tensorToStore = tensor
       }
-
       flatMapped.append((mappedKey, tensorToStore))
     }
 
