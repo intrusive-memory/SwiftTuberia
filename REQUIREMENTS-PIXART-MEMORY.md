@@ -39,7 +39,7 @@ exists and correctly frees the packed weights; it is simply never called mid-fli
 
 | # | Area | Status | Evidence / Target |
 |---|---|---|---|
-| 1 | Free T5 encoder before denoise (two-phase load) | ❌ TODO | REQ-MEM-01 — `DiffusionPipeline.loadModels()`/`generate()` |
+| 1 | Free T5 encoder before denoise (phased unload + reload) | ✅ DONE | REQ-MEM-01 — `DiffusionPipeline.generate()` phased unload + reload-on-entry; `PhasedEncoderMemoryTests` |
 | 2 | Periodic MLX cache clear inside the denoise loop | ❌ TODO | REQ-MEM-02 — `DiffusionPipeline` denoise loop `:1019-1312` |
 | 3 | iOS gate uses per-process jetsam budget + phased peak | ❌ TODO | REQ-MEM-03 — `MemoryManager.availableMemory`, `loadModels` gate |
 | 4 | Per-phase `physFootprint` telemetry on the PixArt path | ❌ TODO | REQ-MEM-04 — `TuberiaTelemetryEvent` + emission sites |
