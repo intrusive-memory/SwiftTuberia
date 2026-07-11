@@ -1,6 +1,6 @@
 # SwiftTuberia — Test Coverage Gap Requirements
 
-**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Remediation requirements derived from the 2026-04-08 test suite evaluation. Covers both
 redundant tests to remove and new tests to write. All new tests must comply with the CI stability
 rules in [`TESTING.md`](TESTING.md) (no timed tests, no real weights, no network access).

@@ -109,6 +109,50 @@ public actor DiffusionPipeline<
     )
   }
 
+  // MARK: - Phased Encoder Memory (REQ-MEM-01)
+
+  /// When true, the text encoder is freed after the encode phase of each
+  /// `generate()` — before the denoise loop — and transparently reloaded on the
+  /// next `generate()`. This keeps the large text encoder (e.g. int4 T5-XXL,
+  /// ~1.2 GB, 72% of PixArt's weight footprint) out of the memory-heavy
+  /// denoise/decode phases, which is what prevents PixArt from OOM/jetsam-killing
+  /// on iOS.
+  ///
+  /// Defaults to `true` on iOS (jetsam pressure) and `false` on macOS (ample RAM;
+  /// avoids a ~1.2 GB reload per `generate()`). Overridable for tests and for
+  /// callers that want to force phased behavior on a specific device tier.
+  public var freeEncoderAfterEncode: Bool = {
+    #if os(iOS)
+      return true
+    #else
+      return false
+    #endif
+  }()
+
+  /// True once the encoder has been loaded and then freed by the phased unload.
+  /// Gates the reload-on-entry in `generate()` so a *never-loaded* pipeline still
+  /// throws `missingComponent(role:"encoder")` (preserving the load-before-generate
+  /// contract), while a *freed-after-encode* encoder is transparently restored.
+  private var encoderEverLoaded = false
+
+  /// Test seam: overrides how the encoder is reloaded after a phased unload.
+  /// Production reload goes through `WeightLoader` + Acervo (see
+  /// `ensureEncoderLoaded()`); mock-based tests inject a closure that re-applies
+  /// synthetic weights without disk/network access. `nil` uses the production path.
+  var encoderReloadOverride: (@Sendable () async throws -> Void)? = nil
+
+  /// Force the phased-encoder behavior on or off, overriding the platform default
+  /// (`true` on iOS, `false` on macOS). Callers on constrained non-iOS tiers can
+  /// opt in; tests use it to exercise the unload/reload path on macOS.
+  public func setFreeEncoderAfterEncode(_ enabled: Bool) {
+    freeEncoderAfterEncode = enabled
+  }
+
+  /// Test seam setter for `encoderReloadOverride` (see property doc).
+  func setEncoderReloadOverride(_ override: (@Sendable () async throws -> Void)?) {
+    encoderReloadOverride = override
+  }
+
   // MARK: - Telemetry Seam (OPERATION GLASS PIPES Sortie 2)
 
   /// Instance-bound telemetry reporter installed via `setTelemetry(_:)`.
@@ -667,12 +711,61 @@ public actor DiffusionPipeline<
     encoder.unload()
     backbone.unload()
     decoder.unload()
+    // Full teardown: a subsequent generate() must call loadModels() again rather
+    // than reload just the encoder, so clear the phased-reload gate (REQ-MEM-01).
+    encoderEverLoaded = false
 
     for componentId in _componentIdByRole.values {
       await MemoryManager.shared.unregisterLoaded(component: componentId)
     }
 
     await MemoryManager.shared.clearGPUCache()
+  }
+
+  /// Reload the text-encoder weights after a phased unload (REQ-MEM-01).
+  ///
+  /// PixArt is load-once/generate-many: freeing the encoder after the encode
+  /// phase means the *next* `generate()` must restore it before encoding. This
+  /// mirrors the encoder arm of `loadModels()` for a single segment; the proven
+  /// multi-segment `loadModels()` load path is intentionally left untouched.
+  private func ensureEncoderLoaded() async throws {
+    guard !encoder.isLoaded else { return }
+
+    // Test seam: mocks re-apply synthetic weights without Acervo/disk access.
+    if let encoderReloadOverride {
+      try await encoderReloadOverride()
+      return
+    }
+
+    guard let componentId = findComponentId(for: .encoder) else { return }
+
+    if let telemetry {
+      await telemetry.capture(
+        .weightLoadStart(role: PipelineRole.encoder.rawValue, componentID: componentId))
+    }
+    let weightLoadStart = Date()
+    let weights = try await WeightLoader.load(
+      componentId: componentId,
+      keyMapping: encoder.keyMapping,
+      tensorTransform: encoder.tensorTransform,
+      quantization: _encoderQuantization,
+      telemetry: telemetry
+    )
+    try encoder.apply(weights: weights)
+    await MemoryManager.shared.registerLoaded(
+      component: componentId,
+      bytes: UInt64(encoder.estimatedMemoryBytes)
+    )
+    if let telemetry {
+      await telemetry.capture(
+        .weightLoadComplete(
+          role: PipelineRole.encoder.rawValue,
+          componentID: componentId,
+          paramCount: weights.parameters.count,
+          totalBytes: UInt64(encoder.estimatedMemoryBytes),
+          durationSeconds: Date().timeIntervalSince(weightLoadStart)
+        ))
+    }
   }
 
   // MARK: - Generate Orchestration
@@ -690,7 +783,18 @@ public actor DiffusionPipeline<
     request: Request,
     progress: @Sendable (PipelineProgress) -> Void
   ) async throws -> Result {
+    // REQ-MEM-01: the encoder may have been freed after a previous generation's
+    // encode phase (phased memory — `freeEncoderAfterEncode`). PixArt is
+    // load-once/generate-many, so restore it before encoding. `encoderEverLoaded`
+    // keeps a *never-loaded* pipeline throwing missingComponent (load-before-
+    // generate contract) rather than silently reloading here.
+    if !encoder.isLoaded, encoderEverLoaded {
+      try await ensureEncoderLoaded()
+    }
     guard encoder.isLoaded else {
+      // Reload could not materialize weights (or the pipeline was never loaded) —
+      // fail loudly rather than let encode() silently return zero embeddings
+      // (T5XXLEncoder returns a zeros placeholder when its transformer is nil).
       if let telemetry {
         await telemetry.capture(
           .errorThrown(
@@ -916,6 +1020,29 @@ public actor DiffusionPipeline<
         unconditionalOutput = nil
       }
       progress(.encoding(fraction: 1.0))
+
+      // REQ-MEM-01: The text encoder (e.g. int4 T5-XXL, ~1.2 GB — 72% of PixArt's
+      // weight footprint) is dead weight from here on: neither the denoise loop
+      // nor decode touch it. Materialize the conditioning FIRST — `encode()`
+      // returns a lazy MLX graph over the encoder's packed weights, so freeing
+      // those weights before an `eval` would sever the graph and corrupt step 0 —
+      // then unload the encoder so it is not resident during the memory-heavy
+      // denoise/decode phases. On iOS this is what keeps PixArt under the jetsam
+      // cap. NEVER dequantize to shrink the encoder: fp16 inflates int4 T5-XXL
+      // from ~1.2 GB to ~9.4 GB and OOMs the iPad (see T5XXLEncoder.apply). The
+      // encoder is transparently reloaded at the top of the next generate().
+      if freeEncoderAfterEncode {
+        eval(conditionalOutput.embeddings, conditionalOutput.mask)
+        if let unconditionalOutput {
+          eval(unconditionalOutput.embeddings, unconditionalOutput.mask)
+        }
+        encoder.unload()
+        await MemoryManager.shared.clearGPUCache()
+        if let encoderComponentId = findComponentId(for: .encoder) {
+          await MemoryManager.shared.unregisterLoaded(component: encoderComponentId)
+        }
+        encoderEverLoaded = true
+      }
 
       // --- Step 2: Prepare initial latents ---
       let latentHeight = request.height / 8

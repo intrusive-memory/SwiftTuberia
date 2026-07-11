@@ -26,9 +26,9 @@ SwiftTuberia currently uses a **duplicate `ComponentDescriptor` type** and a **c
 | v2 API Adoption | ❌ MISSING | Should migrate to `withComponentAccess()` |
 | Integrity Verification | ❌ MISSING | TuberiaCatalog ComponentDescriptor has no checksums |
 
-**Master Index**: See [`REQUIREMENTS.md`](../../REQUIREMENTS.md) for mission context, terminology, and cross-project tracking.
+**Master Index**: See [`REQUIREMENTS.md`](REQUIREMENTS.md) for mission context, terminology, and cross-project tracking.
 
-**Architectural Context**: See [`REQUIREMENTS.md`](../../REQUIREMENTS.md) for SwiftTuberia's design philosophy and the plumbing system metaphor.
+**Architectural Context**: See [`REQUIREMENTS.md`](REQUIREMENTS.md) for SwiftTuberia's design philosophy and the plumbing system metaphor.
 
 ---
 

@@ -1,6 +1,6 @@
 # SwiftTuberia — Pipeline Composition
 
-**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Pipeline protocol, DiffusionPipeline orchestration, recipe system, two-phase loading, LoRA support, error model, and all pipeline-level types. This document contains both the design rationale and the canonical Swift definitions.
 
 ---

@@ -1,6 +1,6 @@
 # SwiftTuberia — Shared Component Catalog
 
-**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Concrete implementations of pipe segments that are reused across multiple models. These live in the `TuberiaCatalog` target. This document contains both the component specifications and the canonical Swift configuration type definitions.
 
 ---
