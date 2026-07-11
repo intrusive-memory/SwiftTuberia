@@ -6,7 +6,7 @@ type: reference
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.7.9
+**Version**: 0.7.9-dev
 
 ---
 
