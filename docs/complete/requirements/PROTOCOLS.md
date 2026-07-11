@@ -1,6 +1,6 @@
 # SwiftTuberia — Pipe Segment Protocols
 
-**Parent**: [`REQUIREMENTS.md`](../../../REQUIREMENTS.md) — SwiftTuberia Overview
+**Parent**: [`REQUIREMENTS.md`](../REQUIREMENTS.md) — SwiftTuberia Overview
 **Scope**: Typed pipe segment protocols that define the inlet/outlet contracts for every component in a generation pipeline. This document contains both the design rationale and the canonical Swift definitions.
 
 ---

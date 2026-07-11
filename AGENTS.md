@@ -1,3 +1,7 @@
+---
+type: reference
+---
+
 # AGENTS.md
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
@@ -186,7 +190,8 @@ Two products:
 - **TuberiaCatalog** -- Concrete shared components (T5-XXL, SDXL VAE, DPM-Solver++, FlowMatch Euler, ImageRenderer, AudioRenderer)
 
 Documentation:
-- [REQUIREMENTS.md](REQUIREMENTS.md) — active mission scope
+- [REQUIREMENTS-PIXART-MEMORY.md](REQUIREMENTS-PIXART-MEMORY.md) — active mission scope (PixArt iOS peak-memory reduction)
+- [docs/complete/REQUIREMENTS.md](docs/complete/REQUIREMENTS.md) — SwiftAcervo v2 integration spec (completed, archived)
 - [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — generation path analysis
 
 ## Dependencies
@@ -214,7 +219,7 @@ Available schemes: `SwiftTuberia-Package`, `Tuberia`, `TuberiaCatalog`. Run `xco
 
 `xcodebuild test` must be invoked with `-parallel-testing-enabled NO`. MLX owns a process-global Metal GPU stream, and Swift Testing's default cross-suite parallelism races on the shared command buffer, producing `-[_MTLCommandBuffer addCompletedHandler:] 'Completed handler provided after commit call'` and aborting the process. Suite-level `.serialized` traits only serialize tests within a suite — they do not prevent sibling suites from running concurrently. `make test` and the CI workflow already apply this flag; any ad-hoc `xcodebuild test` invocation must set it too.
 
-See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
+See [docs/complete/REQUIREMENTS.md](docs/complete/REQUIREMENTS.md) for the completed SwiftAcervo v2 integration specification.
 See [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) for generation path analysis.
 
 ---

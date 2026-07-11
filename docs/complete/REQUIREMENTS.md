@@ -1,9 +1,10 @@
 ---
+type: project
 title: "SwiftTuberia — SwiftAcervo v2 Integration Requirements"
 date: 2026-04-20
-status: "ACTIVE — partially implemented"
+status: "COMPLETE — archived 2026-07-10; shipped via v0.3.9 (#18) and subsequent SwiftAcervo floor bumps"
 master_index: "/Users/stovak/Projects/REQUIREMENTS.md"
-audit_source: "docs/complete/AUDIT_FINDINGS.md (Sorties T1–T5)"
+audit_source: "AUDIT_FINDINGS.md (Sorties T1–T5)"
 ---
 
 # SwiftTuberia — SwiftAcervo v2 Integration Requirements

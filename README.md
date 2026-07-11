@@ -1,3 +1,7 @@
+---
+type: reference
+---
+
 # SwiftTuberia
 
 **v0.7.8-dev** — Componentized generation pipeline for MLX inference.
@@ -113,7 +117,7 @@ process-wide one.
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — Architecture, API, and interop documentation
-- [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
+- [docs/complete/REQUIREMENTS.md](docs/complete/REQUIREMENTS.md) — SwiftAcervo v2 integration spec (completed, archived)
 - [GENERATION_PATHS.md](docs/GENERATION_PATHS.md) — Generation path analysis
 
 ## License
