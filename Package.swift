@@ -65,7 +65,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.19.2"),
+      from: "0.25.0"),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
     // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild
     // (the old RustBuffer/module-map blocker is resolved).
