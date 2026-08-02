@@ -1,16 +1,25 @@
 ---
 type: reference
+updated: 2026-08-02
 ---
 
 # AGENTS.md
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.7.9
+**Version**: 0.8.0
 
 ---
 
 ## Recent Changes
+
+### v0.8.0 — Per-process iOS memory gate + SwiftAcervo 0.25.0 floor bump
+
+Minor release correcting the iOS memory admission gate and refreshing dependency floors.
+
+- **Per-process memory gate on iOS** (REQ-MEM-03, #50): `MemoryManager` now gates on the process's jetsam budget (`os_proc_available_memory` + `physFootprint`) instead of system-wide VM statistics, so a generation that fits the process budget is no longer rejected — and one that doesn't fails the gate cleanly instead of being jetsam-killed mid-run.
+- **SwiftAcervo floor bump**: `0.19.2` → `0.25.0` (latest published release — retains `.upToNextMajor`).
+- **MIT LICENSE** added at the repo root.
 
 ### v0.7.5 — swift-tokenizers 0.5.x → 0.7.1 migration + SwiftAcervo floor bump
 
@@ -176,6 +185,22 @@ This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftA
 Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.
 
 ---
+
+## Queryable Codemap
+
+A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
+codebase lives in [`graphify-out/`](graphify-out/) (1559 nodes · 2655 edges). **Prefer
+querying it before grepping** for architecture or "what connects to what" questions:
+
+```bash
+graphify query "How does X flow through the system?"
+graphify path "TypeA" "TypeB"      # shortest path between two nodes
+graphify explain "SomeType"        # plain-language node explanation
+```
+
+Human-readable summary: [`graphify-out/GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md).
+Refresh after significant changes with `/codemap` (or
+`graphify . --backend claude-cli`).
 
 ## Project Overview
 
