@@ -1,16 +1,25 @@
 ---
 type: reference
+updated: 2026-08-02
 ---
 
 # AGENTS.md
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.7.9-dev
+**Version**: 0.8.0
 
 ---
 
 ## Recent Changes
+
+### v0.8.0 — Per-process iOS memory gate + SwiftAcervo 0.25.0 floor bump
+
+Minor release correcting the iOS memory admission gate and refreshing dependency floors.
+
+- **Per-process memory gate on iOS** (REQ-MEM-03, #50): `MemoryManager` now gates on the process's jetsam budget (`os_proc_available_memory` + `physFootprint`) instead of system-wide VM statistics, so a generation that fits the process budget is no longer rejected — and one that doesn't fails the gate cleanly instead of being jetsam-killed mid-run.
+- **SwiftAcervo floor bump**: `0.19.2` → `0.25.0` (latest published release — retains `.upToNextMajor`).
+- **MIT LICENSE** added at the repo root.
 
 ### v0.7.5 — swift-tokenizers 0.5.x → 0.7.1 migration + SwiftAcervo floor bump
 
