@@ -6,6 +6,12 @@ import MLX
   import MachO
 #endif
 
+// `os_proc_available_memory()` is declared in `os/proc.h`, which Swift surfaces
+// through the `os` module rather than `Darwin`.
+#if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+  import os
+#endif
+
 /// Coordinates memory across all loaded pipe segments. Global singleton actor.
 ///
 /// MemoryManager tracks all loaded components across all pipelines (image, TTS, etc.).
@@ -41,11 +47,36 @@ public actor MemoryManager {
     return memSize
   }
 
-  /// Available memory in bytes, using Mach VM statistics.
-  /// Includes free + inactive + purgeable + speculative pages for a realistic
-  /// picture of usable memory rather than just "free" pages.
+  /// Memory this process may still allocate, in bytes.
+  ///
+  /// **The number this returns is deliberately different per platform, because
+  /// the thing that kills you is different per platform.**
+  ///
+  /// On iOS/tvOS/watchOS/visionOS the limit is *per process*: jetsam watches
+  /// this task's `phys_footprint` against a cap that is a fraction of device
+  /// RAM, and kills the app when it crosses. System-wide free memory says
+  /// nothing about how close you are to that cap — a device can report
+  /// gigabytes free while this process is megabytes from being killed. So we
+  /// ask `os_proc_available_memory()`, which reports exactly the remaining
+  /// headroom before this process hits its own limit.
+  ///
+  /// On macOS there is no such per-process cap for ordinary apps; the kernel
+  /// reclaims from compressed, inactive, and cached pages and swaps on demand.
+  /// There, system-wide reclaimable memory (free + inactive + purgeable +
+  /// speculative) is the meaningful figure and `os_proc_available_memory()` is
+  /// unavailable.
+  ///
+  /// Consumers should not special-case platforms themselves — ``softCheck(requiredBytes:)``
+  /// and ``hardValidate(requiredBytes:telemetry:)`` are built on this and are
+  /// correct on both.
   public var availableMemory: UInt64 {
-    #if canImport(Darwin)
+    #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+      // Remaining bytes before THIS process trips its jetsam footprint limit.
+      // Returns 0 if unavailable, which we treat as "no headroom left" rather
+      // than silently falling back to a system-wide number that would answer a
+      // different question.
+      return UInt64(max(0, os_proc_available_memory()))
+    #elseif canImport(Darwin)
       var stats = vm_statistics64()
       var count = mach_msg_type_number_t(
         MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size
