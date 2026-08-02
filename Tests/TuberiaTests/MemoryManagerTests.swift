@@ -87,6 +87,30 @@ struct MemoryManagerTests {
     #expect(await manager.availableMemory > 0)
   }
 
+  @Test("availableMemory never exceeds total physical memory")
+  func availableMemoryIsBoundedByTotal() async throws {
+    // Holds on both platforms, but it is the iOS reading this really guards:
+    // there `availableMemory` is `os_proc_available_memory()` — headroom before
+    // THIS process trips its jetsam footprint cap — which is a fraction of
+    // device RAM. A value at or above `totalMemory` would mean the per-process
+    // gate had silently reverted to a system-wide sum, which is the bug this
+    // API exists to prevent.
+    let manager = MemoryManager.shared
+    let total = await manager.totalMemory
+    let available = await manager.availableMemory
+    #expect(available <= total)
+  }
+
+  @Test("residentFootprint reports this process's phys_footprint")
+  func residentFootprintIsPositiveAndBounded() async throws {
+    // `residentFootprint` is the number jetsam actually watches. It was already
+    // present but unused by any gate; assert it is live so it stays wired.
+    let manager = MemoryManager.shared
+    let footprint = await manager.residentFootprint
+    #expect(footprint > 0)
+    #expect(footprint <= (await manager.totalMemory))
+  }
+
   // MARK: - Device Capability
 
   @Test("deviceCapability matches DeviceCapability.current")
