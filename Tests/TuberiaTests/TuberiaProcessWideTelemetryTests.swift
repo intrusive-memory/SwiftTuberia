@@ -104,7 +104,6 @@ struct TuberiaProcessWideTelemetryTests {
       recipe: DenoiseNoCFGRecipe(),
       telemetry: instanceRecorder
     )
-    await pipeline.setMemoryGate { _ in /* no-op */ }
 
     let request = DiffusionGenerationRequest(
       prompt: "instance wins test",
@@ -179,7 +178,6 @@ struct TuberiaProcessWideTelemetryTests {
 
     // Pipeline with NO instance reporter — all events must come via process-wide.
     let pipeline = try DenoisePipeline(recipe: DenoiseNoCFGRecipe(), telemetry: nil)
-    await pipeline.setMemoryGate { _ in /* no-op */ }
 
     let request = DiffusionGenerationRequest(
       prompt: "process-wide pipeline test",

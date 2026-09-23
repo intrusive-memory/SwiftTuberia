@@ -56,6 +56,8 @@ public enum TuberiaTelemetryEvent: Sendable {
 
   // MARK: - Memory gate
 
+  /// Retained for wire compatibility. `DiffusionPipeline.loadModels` no longer
+  /// runs a pre-flight memory gate, so this event is no longer emitted.
   case memoryGateChecked(requiredBytes: UInt64, passed: Bool)
 
   // MARK: - Weight loading

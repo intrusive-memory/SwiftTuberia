@@ -95,7 +95,6 @@ struct TuberiaTelemetryAnomalyTests {
 
   private func makePipeline(rec: RecordingTelemetryReporter) async throws -> AnomalyPipeline {
     let pipeline = try AnomalyPipeline(recipe: AnomalyRecipe(), telemetry: rec)
-    await pipeline.setMemoryGate { _ in /* no-op */ }
     return pipeline
   }
 

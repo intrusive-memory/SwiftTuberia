@@ -219,7 +219,6 @@ struct TuberiaTelemetryDenoiseLoopTests {
 
   private func makePipeline(rec: RecordingTelemetryReporter) async throws -> DenoisePipeline {
     let pipeline = try DenoisePipeline(recipe: DenoiseNoCFGRecipe(), telemetry: rec)
-    await pipeline.setMemoryGate { _ in /* no-op */ }
     return pipeline
   }
 
