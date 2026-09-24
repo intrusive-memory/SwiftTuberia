@@ -1,17 +1,27 @@
 ---
 type: reference
-updated: 2026-08-02
+updated: 2026-09-23
 ---
 
 # AGENTS.md
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.8.0
+**Version**: 0.9.0
 
 ---
 
 ## Recent Changes
+
+### v0.9.0 — Pre-flight memory gate removed from `DiffusionPipeline.loadModels`
+
+Minor release that drops the up-front admission gate in the load path. Pre-1.0, so the public API removal ships as a minor bump.
+
+- **No pre-flight memory gate** (`5707cb2`): `loadModels(progress:)` no longer calls `MemoryManager.hardValidate` before loading. The former REQ-PIPE-02 gate compared a summed `estimatedMemoryBytes` against a free/inactive/purgeable snapshot (or `os_proc_available_memory` on iOS), which does not predict whether loading will succeed — the kernel reclaims compressed and file-backed pages on demand and MLX allocates lazily. Real allocation failures now surface from the load/generate path itself.
+- **API removed**: `DiffusionPipeline.setMemoryGate(_:)` and the internal `memoryGate` seam are gone. `MemoryManager.softCheck` / `hardValidate` remain available as advisory APIs for callers that want their own policy.
+- **Telemetry**: `TuberiaTelemetryEvent.memoryGateChecked` is retained for wire compatibility but is no longer emitted by the pipeline.
+- **Tests**: `MemoryGuardTests.swift` deleted along with the gate; telemetry tests no longer expect a `memoryGateChecked` event during load.
+- **Package.swift shipped remote-only**: `SwiftAcervo` pinned `.upToNextMajor(from: "0.25.0")`; sibling scaffolding restored on `development` after release.
 
 ### v0.8.0 — Per-process iOS memory gate + SwiftAcervo 0.25.0 floor bump
 

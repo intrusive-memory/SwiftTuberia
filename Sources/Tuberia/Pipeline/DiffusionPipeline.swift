@@ -82,33 +82,6 @@ public actor DiffusionPipeline<
   /// construction and before `loadModels(progress:)`.
   var componentReadinessService: any ComponentReadinessService = AcervoComponentReadinessService()
 
-  // MARK: - Memory Gate Seam (REQ-PIPE-02)
-
-  /// Closure invoked at the start of `loadModels(progress:)` to validate available memory.
-  ///
-  /// Defaults to `MemoryManager.shared.hardValidate(requiredBytes:)`.
-  /// Tests may replace this by calling `setMemoryGate(_:)` to inject a stub
-  /// that simulates insufficient memory without touching the hardware query.
-  ///
-  /// Strategy: single up-front `hardValidate(peakMemoryBytes)` (REQ-PIPE-02, S4).
-  /// Phased-loading with `softCheck` per phase is deferred to a future sortie —
-  /// real peak-vs-phase divergence has not been observed in production workloads.
-  ///
-  /// Sortie 2 (OPERATION GLASS PIPES) widened the gate signature to take a
-  /// `telemetry` parameter so the default closure can forward it to
-  /// `MemoryManager.hardValidate(requiredBytes:telemetry:)`. The public
-  /// `setMemoryGate(_:)` seam still accepts the legacy
-  /// `(UInt64) async throws -> Void` shape — internally the actor wraps any
-  /// custom gate to fit the new two-argument shape so existing test stubs
-  /// compile unchanged.
-  var memoryGate: @Sendable (UInt64, (any TuberiaTelemetryReporter)?) async throws -> Void = {
-    requiredBytes, telemetry in
-    try await MemoryManager.shared.hardValidate(
-      requiredBytes: requiredBytes,
-      telemetry: telemetry
-    )
-  }
-
   // MARK: - Phased Encoder Memory (REQ-MEM-01)
 
   /// When true, the text encoder is freed after the encode phase of each
@@ -521,22 +494,6 @@ public actor DiffusionPipeline<
     componentReadinessService = service
   }
 
-  /// Replace the memory gate — used by tests to inject a stub that simulates
-  /// insufficient memory without querying real hardware.
-  ///
-  /// Call this on the actor before invoking `loadModels(progress:)`.
-  ///
-  /// Accepts the legacy `(UInt64) async throws -> Void` shape for source
-  /// compatibility (Sortie 2 widened the underlying gate type to also accept a
-  /// telemetry reporter — see `memoryGate`). Custom gates installed through
-  /// this seam never see the telemetry reporter, by design: test stubs that
-  /// simulate memory pressure have no business emitting telemetry.
-  public func setMemoryGate(_ gate: @escaping @Sendable (UInt64) async throws -> Void) {
-    memoryGate = { requiredBytes, _ in
-      try await gate(requiredBytes)
-    }
-  }
-
   // MARK: - GenerationPipeline Conformance
 
   /// Memory requirements -- computed from static config, safe to access without `await`.
@@ -558,49 +515,15 @@ public actor DiffusionPipeline<
   ///
   /// Progress callback receives (fraction: Double, component: String).
   public func loadModels(progress: @escaping @Sendable (Double, String) -> Void) async throws {
-    // Memory gate (REQ-PIPE-02, S4): validate available memory before committing to loading.
+    // No pre-flight memory gate. The former REQ-PIPE-02 gate compared a
+    // summed `estimatedMemoryBytes` against a free/inactive/purgeable snapshot
+    // (or `os_proc_available_memory` on iOS), which is not a reliable predictor
+    // of whether loading will actually succeed: the kernel reclaims compressed
+    // and file-backed pages on demand and MLX allocates lazily. Real allocation
+    // failures surface from the load/generate path itself.
     //
-    // Strategy: single up-front hardValidate against peakMemoryBytes.
-    // Phased-loading (softCheck per phase) is deferred — see Open Questions #5 in
-    // EXECUTION_PLAN.md. Any error from hardValidate is a PipelineError.insufficientMemory
-    // and surfaces directly to the caller without wrapping (MemoryManager already throws it).
-    let peak = _memoryRequirement.peakMemoryBytes
-    do {
-      // Pass the installed telemetry reporter through to the gate — the
-      // default gate forwards it to `MemoryManager.hardValidate`; custom
-      // gates installed via `setMemoryGate(_:)` discard the reporter (test
-      // stubs do not emit telemetry).
-      try await memoryGate(peak, telemetry)
-      if let telemetry {
-        await telemetry.capture(.memoryGateChecked(requiredBytes: peak, passed: true))
-      }
-    } catch let error as PipelineError {
-      // Already a PipelineError (e.g. .insufficientMemory from hardValidate) — rethrow as-is.
-      if let telemetry {
-        await telemetry.capture(
-          .memoryGateChecked(requiredBytes: peak, passed: false))
-        await telemetry.capture(
-          .errorThrown(
-            phase: .memoryGate,
-            errorDescription: String(describing: error),
-            stepIndex: nil
-          ))
-      }
-      throw error
-    } catch {
-      // Unexpected error from a custom gate: wrap in insufficientMemory with 0 available.
-      if let telemetry {
-        await telemetry.capture(
-          .memoryGateChecked(requiredBytes: peak, passed: false))
-        await telemetry.capture(
-          .errorThrown(
-            phase: .memoryGate,
-            errorDescription: String(describing: error),
-            stepIndex: nil
-          ))
-      }
-      throw PipelineError.insufficientMemory(required: peak, available: 0, component: "pipeline")
-    }
+    // `MemoryManager.softCheck` / `hardValidate` remain available as advisory
+    // APIs for callers that want their own policy.
 
     // Load the tokenizer for any encoder that supports it (e.g. T5XXLEncoder).
     // This is a non-fatal async step: if tokenizer loading fails, encode() falls

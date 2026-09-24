@@ -118,10 +118,8 @@ public actor MemoryManager {
   ///
   /// - Parameters:
   ///   - requiredBytes: The memory budget to validate against.
-  ///   - telemetry: Optional telemetry reporter forwarded from
-  ///     `DiffusionPipeline.memoryGate`. Defaults to `nil` so existing call
-  ///     sites compile unchanged. Sortie 3+ will wire `memoryGateChecked` /
-  ///     `errorThrown` against this parameter.
+  ///   - telemetry: Optional telemetry reporter. Defaults to `nil` so existing call
+  ///     sites compile unchanged.
   public func hardValidate(
     requiredBytes: UInt64,
     telemetry: (any TuberiaTelemetryReporter)? = nil

@@ -39,8 +39,9 @@ protocol WeightedSegment: Sendable {
 **Loading sequence** (orchestrated by pipeline, not by segment):
 
 Pre-loop (once, at `loadModels` entry):
-- `MemoryManager.shared.hardValidate(requiredBytes: peakMemoryBytes)` — single up-front memory gate
-  via `memoryGate` seam; throws `PipelineError.insufficientMemory` if budget insufficient (REQ-PIPE-02, S4).
+- No pre-flight memory gate as of v0.9.0. The former REQ-PIPE-02 `hardValidate(peakMemoryBytes)`
+  gate and the `setMemoryGate(_:)` seam were removed; allocation failures surface from the
+  load/generate path itself.
 
 Per-segment loop (encoder → backbone → decoder):
 1. `Acervo.ensureComponentReady(id)` — download if not cached (REQ-PIPE-01, S3)
