@@ -84,14 +84,17 @@ actor MemoryManager {
 
 ### Consumer Usage Patterns
 
-**DiffusionPipeline** (internal, as of REQ-PIPE-02 S4 `0c58bf5`):
+**DiffusionPipeline** (internal, as of v0.9.0 `5707cb2`):
 ```
-loadModels() → hardValidate(peakMemoryBytes)         // single up-front gate via memoryGate seam
-  if insufficient → throws PipelineError.insufficientMemory(required:available:component:)
+loadModels()                                          // no pre-flight memory gate
   after each segment load → registerLoaded(component, bytes)
 ```
-Note: phased loading with `softCheck` per phase is deferred. Real peak-vs-phase divergence
-has not been observed for current model configurations.
+Note: the former REQ-PIPE-02 up-front `hardValidate(peakMemoryBytes)` gate (and the
+`setMemoryGate(_:)` seam) was removed in v0.9.0. A summed `estimatedMemoryBytes` compared
+against a free-memory snapshot did not predict load success — the kernel reclaims
+compressed/file-backed pages on demand and MLX allocates lazily. Allocation failures now
+surface from the load/generate path itself. `softCheck` / `hardValidate` remain available
+as advisory APIs for callers that want their own admission policy.
 
 **SwiftVoxAlta** (external):
 ```
