@@ -30,7 +30,7 @@ let package = Package(
     // (the old RustBuffer/module-map blocker is resolved).
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.7.1")),
+      .upToNextMinor(from: "0.7.4")),
   ],
   targets: [
     .target(
