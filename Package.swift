@@ -24,14 +24,13 @@ let package = Package(
     // generation downstream. A floor would still resolve 0.31.4 as the highest
     // in range, so pin exactly until an upstream release fixes #410.
     .package(url: "https://github.com/ml-explore/mlx-swift", .exact("0.31.3")),
-    .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
+    .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
     // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild
     // (the old RustBuffer/module-map blocker is resolved).
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.7.1")),
+      .upToNextMinor(from: "0.7.4")),
   ],
   targets: [
     .target(
