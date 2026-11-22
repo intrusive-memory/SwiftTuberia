@@ -19,11 +19,9 @@ let package = Package(
     ),
   ],
   dependencies: [
-    // Pinned to exactly 0.31.3. mlx-swift 0.31.4 carries upstream #410
-    // (evalLock-during-toString deadlock / EINVAL fatal) that breaks
-    // generation downstream. A floor would still resolve 0.31.4 as the highest
-    // in range, so pin exactly until an upstream release fixes #410.
-    .package(url: "https://github.com/ml-explore/mlx-swift", .exact("0.31.3")),
+    // 0.33.0 carries the evalLock lock-order fixes (#461, #474, #499) that the
+    // old exact 0.31.3 pin was waiting on (0.31.4's #410 deadlocked generation).
+    .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.33.0")),
     .package(
       url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
@@ -31,7 +29,7 @@ let package = Package(
     // (the old RustBuffer/module-map blocker is resolved).
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.7.1")),
+      .upToNextMinor(from: "0.7.5")),
   ],
   targets: [
     .target(

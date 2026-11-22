@@ -7,6 +7,31 @@ import Tuberia
 
 @testable import TuberiaCatalog
 
+/// Resolves the SDXL VAE safetensors from the first readable candidate:
+/// `$SDXL_VAE_WEIGHTS`, a `/tmp` staging copy (xctest is sandboxed and cannot
+/// open files under `~/Library/Group Containers`, so weights must be staged to
+/// an accessible path — see the repo's test-model linking), then the shared
+/// models container as a best-effort fallback. Returns nil if none are
+/// readable (the suite is then skipped). Stage with, e.g.:
+///   mkdir -p /tmp/sdxl-vae-fp16-mlx && ln -f \
+///     "$HOME/Library/Group Containers/group.intrusive-memory.models/SharedModels/\
+/// intrusive-memory_sdxl-vae-fp16-mlx/model.safetensors" /tmp/sdxl-vae-fp16-mlx/
+private func sdxlVAERealWeightsURL() -> URL? {
+  let fm = FileManager.default
+  var candidates: [URL] = []
+  if let override = ProcessInfo.processInfo.environment["SDXL_VAE_WEIGHTS"] {
+    candidates.append(URL(fileURLWithPath: override))
+  }
+  candidates.append(URL(fileURLWithPath: "/tmp/sdxl-vae-fp16-mlx/model.safetensors"))
+  candidates.append(
+    fm.homeDirectoryForCurrentUser.appendingPathComponent(
+      "Library/Group Containers/group.intrusive-memory.models/SharedModels"
+        + "/intrusive-memory_sdxl-vae-fp16-mlx/model.safetensors"))
+  // Probe by actually opening the file: under the sandbox `fileExists` can be
+  // true for a path that cannot be opened, so a stat-only check is unreliable.
+  return candidates.first { (try? Data(contentsOf: $0, options: .alwaysMapped)) != nil }
+}
+
 /// Real-weights validation for the #45 VAE-decode fixes: feathered tiled decode
 /// (seam parity vs. full-frame) and fp16 decode (parity vs. fp32, NaN-free).
 ///
@@ -15,35 +40,21 @@ import Tuberia
 /// `SDXLVAEDecoder.decode` path, so they only run when the weights are present
 /// locally (and are skipped — not failed — in CI runners that don't have them).
 /// Set `SDXL_VAE_WEIGHTS` to override the path.
-@Suite("SDXLVAEDecoder real-weights decode (#45)", .serialized)
+///
+/// The skip is a suite-level `.enabled(if:)` trait. Recording an `Issue` from
+/// inside the test body is *not* a skip in Swift Testing — it fails the test —
+/// which is why these three tests used to fail `make test` on any machine
+/// without readable weights.
+@Suite(
+  "SDXLVAEDecoder real-weights decode (#45)",
+  .serialized,
+  .enabled(
+    if: sdxlVAERealWeightsURL() != nil,
+    "SDXL VAE weights not readable; set SDXL_VAE_WEIGHTS or stage /tmp/sdxl-vae-fp16-mlx")
+)
 struct SDXLVAEDecoderRealWeightsTests {
 
   // MARK: - Helpers
-
-  /// Resolves the SDXL VAE safetensors from the first readable candidate:
-  /// `$SDXL_VAE_WEIGHTS`, a `/tmp` staging copy (xctest is sandboxed and cannot
-  /// open files under `~/Library/Group Containers`, so weights must be staged to
-  /// an accessible path — see the repo's test-model linking), then the shared
-  /// models container as a best-effort fallback. Returns nil if none are
-  /// readable (the test then self-skips). Stage with, e.g.:
-  ///   mkdir -p /tmp/sdxl-vae-fp16-mlx && ln -f \
-  ///     "$HOME/Library/Group Containers/group.intrusive-memory.models/SharedModels/\
-  /// intrusive-memory_sdxl-vae-fp16-mlx/model.safetensors" /tmp/sdxl-vae-fp16-mlx/
-  private static func weightsURL() -> URL? {
-    let fm = FileManager.default
-    var candidates: [URL] = []
-    if let override = ProcessInfo.processInfo.environment["SDXL_VAE_WEIGHTS"] {
-      candidates.append(URL(fileURLWithPath: override))
-    }
-    candidates.append(URL(fileURLWithPath: "/tmp/sdxl-vae-fp16-mlx/model.safetensors"))
-    candidates.append(
-      fm.homeDirectoryForCurrentUser.appendingPathComponent(
-        "Library/Group Containers/group.intrusive-memory.models/SharedModels"
-          + "/intrusive-memory_sdxl-vae-fp16-mlx/model.safetensors"))
-    // Probe by actually opening the file: under the sandbox `fileExists` can be
-    // true for a path that cannot be opened, so a stat-only check is unreliable.
-    return candidates.first { (try? Data(contentsOf: $0, options: .alwaysMapped)) != nil }
-  }
 
   /// Builds a decoder with `config` and applies the checkpoint at `url` through
   /// the decoder's real key mapping.
@@ -75,10 +86,7 @@ struct SDXLVAEDecoderRealWeightsTests {
   /// (boundary gradient stays close to the interior gradient — no seam).
   @Test("tiled decode is seam-free vs full-frame on real weights")
   func tiledSeamFreeOnRealWeights() throws {
-    guard let url = Self.weightsURL() else {
-      Issue.record("SDXL VAE weights not found; skipping real-weights tiled-decode test")
-      return
-    }
+    let url = try #require(sdxlVAERealWeightsURL(), "suite is gated on weights being readable")
     let full = try Self.loadDecoder(url, config: .init(decodeDType: .float32))
     let tiled = try Self.loadDecoder(
       url,
@@ -127,10 +135,7 @@ struct SDXLVAEDecoderRealWeightsTests {
   /// does not overflow. This validates that default end-to-end on real weights.
   @Test("default (bf16) decode matches fp32 and is NaN-free on real weights")
   func defaultDTypeMatchesFp32OnRealWeights() throws {
-    guard let url = Self.weightsURL() else {
-      Issue.record("SDXL VAE weights not found; skipping real-weights dtype parity test")
-      return
-    }
+    let url = try #require(sdxlVAERealWeightsURL(), "suite is gated on weights being readable")
     // Default config (decodeDType defaults to bf16).
     let dDefault = try Self.loadDecoder(url, config: .init())
     let d32 = try Self.loadDecoder(url, config: .init(decodeDType: .float32))
@@ -159,10 +164,7 @@ struct SDXLVAEDecoderRealWeightsTests {
   /// fp16 could be reconsidered as the default for the extra mantissa bits.
   @Test("fp16 decode overflows to NaN on the real force_upcast VAE (why default is bf16)")
   func fp16OverflowsOnRealWeights() throws {
-    guard let url = Self.weightsURL() else {
-      Issue.record("SDXL VAE weights not found; skipping fp16-instability guard")
-      return
-    }
+    let url = try #require(sdxlVAERealWeightsURL(), "suite is gated on weights being readable")
     let d16 = try Self.loadDecoder(url, config: .init(decodeDType: .float16))
     MLXRandom.seed(11)
     let latent = MLXRandom.normal([1, 64, 64, 4])

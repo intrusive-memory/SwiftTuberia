@@ -44,13 +44,12 @@ struct ImageRendererConversionTests {
     }
 
     // Verify at least one pixel channel is 0
-    let bitmapData = cgImage.dataProvider?.data
-    guard let bytes = bitmapData as? NSData else {
+    guard let bitmapData = cgImage.dataProvider?.data,
+      let pixelBytes = CFDataGetBytePtr(bitmapData)
+    else {
       Issue.record("Failed to extract bitmap data")
       return
     }
-
-    let pixelBytes = bytes.bytes.assumingMemoryBound(to: UInt8.self)
     var foundZeroChannel = false
     for i in 0..<min(3, cgImage.width * cgImage.height * 4) {
       if pixelBytes[i] == 0 {
@@ -77,13 +76,12 @@ struct ImageRendererConversionTests {
     }
 
     // Verify at least one pixel channel is 255
-    let bitmapData = cgImage.dataProvider?.data
-    guard let bytes = bitmapData as? NSData else {
+    guard let bitmapData = cgImage.dataProvider?.data,
+      let pixelBytes = CFDataGetBytePtr(bitmapData)
+    else {
       Issue.record("Failed to extract bitmap data")
       return
     }
-
-    let pixelBytes = bytes.bytes.assumingMemoryBound(to: UInt8.self)
     var found255Channel = false
     let checkLimit = min(cgImage.width * cgImage.height * 4, 256)
     for i in 0..<checkLimit {
@@ -117,13 +115,12 @@ struct ImageRendererConversionTests {
     }
 
     // Extract bitmap and verify all pixel values are within [0, 255]
-    let bitmapData = cgImage.dataProvider?.data
-    guard let bytes = bitmapData as? NSData else {
+    guard let bitmapData = cgImage.dataProvider?.data,
+      let pixelBytes = CFDataGetBytePtr(bitmapData)
+    else {
       Issue.record("Failed to extract bitmap data")
       return
     }
-
-    let pixelBytes = bytes.bytes.assumingMemoryBound(to: UInt8.self)
     let totalBytes = cgImage.width * cgImage.height * 4
     for i in 0..<min(totalBytes, 256) {
       let value = pixelBytes[i]

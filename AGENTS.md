@@ -7,11 +7,19 @@ updated: 2026-09-23
 
 This file provides comprehensive documentation for AI agents working with the SwiftTuberia codebase.
 
-**Version**: 0.9.0
+**Version**: 0.10.0
 
 ---
 
 ## Recent Changes
+
+### v0.10.0 — mlx-swift 0.33
+
+Minor release that moves the MLX floor. Pre-1.0, so a dependency floor that drops older MLX ships as a minor bump.
+
+- **mlx-swift `.upToNextMajor(from: "0.33.0")`**, replacing the exact `0.31.3` pin. The pin was taken after mlx-swift 0.31.4 (upstream #410, `evalLock` in `description`) deadlocked generation; 0.33.0 carries the `evalLock` lock-order fixes (#461, #474, #499). Verified in flux-2-swift-mlx on 0.33: Klein 4B text-to-image end to end, the GPU and integration suites, and the TSan lock-contention tests.
+- **swift-tokenizers** floor 0.7.4 → 0.7.5.
+- Consumers that pin mlx-swift below 0.33 (for example flux-2-swift-mlx ≤ 3.4.x, exact 0.31.3) no longer resolve with this release; move them to 0.33 together.
 
 ### v0.9.0 — Pre-flight memory gate removed from `DiffusionPipeline.loadModels`
 
@@ -199,7 +207,7 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 ## Queryable Codemap
 
 A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
-codebase lives in [`graphify-out/`](graphify-out/) (1559 nodes · 2655 edges). **Prefer
+codebase lives in [`graphify-out/`](graphify-out/) (1627 nodes · 2794 edges). **Prefer
 querying it before grepping** for architecture or "what connects to what" questions:
 
 ```bash
@@ -231,7 +239,7 @@ Documentation:
 
 ## Dependencies
 
-- `mlx-swift` (≥ 0.31.3) -- Apple's MLX framework for Swift
+- `mlx-swift` (≥ 0.33.0) -- Apple's MLX framework for Swift. 0.31.3 was pinned exactly after 0.31.4 deadlocked generation (upstream #410); 0.33.0 carries the lock-order fixes and passes the flux GPU suite.
 - `swift-tokenizers` (≥ 0.4.2, `Swift` trait) -- Tokenizer support (`Tokenizers` product only)
 - `SwiftAcervo` (≥ 0.8.3) -- Model registry, CDN download, integrity verification
 
