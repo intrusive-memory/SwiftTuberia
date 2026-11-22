@@ -231,7 +231,7 @@ Documentation:
 
 ## Dependencies
 
-- `mlx-swift` (≥ 0.31.3) -- Apple's MLX framework for Swift
+- `mlx-swift` (≥ 0.33.0) -- Apple's MLX framework for Swift. 0.31.3 was pinned exactly after 0.31.4 deadlocked generation (upstream #410); 0.33.0 carries the lock-order fixes and passes the flux GPU suite.
 - `swift-tokenizers` (≥ 0.4.2, `Swift` trait) -- Tokenizer support (`Tokenizers` product only)
 - `SwiftAcervo` (≥ 0.8.3) -- Model registry, CDN download, integrity verification
 
