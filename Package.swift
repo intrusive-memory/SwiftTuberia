@@ -22,7 +22,8 @@ let package = Package(
     // 0.33.0 carries the evalLock lock-order fixes (#461, #474, #499) that the
     // old exact 0.31.3 pin was waiting on (0.31.4's #410 deadlocked generation).
     .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMajor(from: "0.33.0")),
-    .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
+    .package(
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
     // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild
     // (the old RustBuffer/module-map blocker is resolved).
